@@ -9,14 +9,15 @@
     "start": "NODE_ENV=production node dist/index.js"
   },
   "dependencies": {
-    "elysia": "^1.0.0",
+    "@elysiajs/cors": "^1.4.0",
     "@elysiajs/node": "^1.0.0",
     "@sinclair/typebox": "^0.34.0",
+    "elysia": "^1.0.0",
     "openapi-types": "^12.0.0"
   },
   "devDependencies": {
-    "tsx": "^4.7.0",
     "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.9.2"
   }
 }
