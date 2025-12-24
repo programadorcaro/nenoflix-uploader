@@ -14,7 +14,8 @@ const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
 const app = new Elysia({ adapter: node() })
   .use(
     cors({
-      origin: "http://localhost:3002",
+      // TODO: Change to the frontend URL
+      origin: "*",
       methods: ["GET", "POST", "OPTIONS"],
       allowedHeaders: ["Content-Type"],
     })
