@@ -2,11 +2,12 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup } from "@/components/ui/field";
+import { Field } from "@/components/ui/field";
 import { ContentTypeSelector } from "./content-type-selector";
 import { FolderSelector } from "./folder-selector";
 import type { ContentType, Step1Data } from "../types";
 import { BACKEND_URL } from "../constants";
+import { FINAL_PATH } from "@/lib/consts";
 
 interface Step1Props {
   data: Step1Data;
@@ -61,11 +62,11 @@ export function Step1({
     onError(null);
     let basePath = "";
     if (type === "movies") {
-      basePath = "~/nenoflix-uploads/movies";
+      basePath = `${FINAL_PATH}movies`;
     } else if (type === "series") {
-      basePath = "~/nenoflix-uploads/series";
+      basePath = `${FINAL_PATH}series`;
     } else if (type === "animes") {
-      basePath = "~/nenoflix-uploads/animes";
+      basePath = `${FINAL_PATH}animes`;
     }
 
     onDataChange({
@@ -134,4 +135,3 @@ export function Step1({
     </div>
   );
 }
-
