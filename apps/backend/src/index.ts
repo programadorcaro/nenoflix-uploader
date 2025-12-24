@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { node } from "@elysiajs/node";
 import { cors } from "@elysiajs/cors";
-import { writeFile, mkdir, readdir } from "fs/promises";
+import { writeFile, mkdir, readdir, copyFile, unlink } from "fs/promises";
 import { join, extname, isAbsolute, resolve, normalize } from "path";
 import { existsSync, statSync } from "fs";
 import { homedir } from "os";
@@ -10,6 +10,22 @@ const PORT = 8081;
 const DEFAULT_TMP_DIR = "tmp";
 
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
+
+// Helper function to move files, handling cross-device scenarios
+async function moveFile(source: string, destination: string): Promise<void> {
+  try {
+    const { rename } = await import("fs/promises");
+    await rename(source, destination);
+  } catch (error: any) {
+    // If rename fails due to cross-device link (EXDEV), use copy + unlink
+    if (error.code === "EXDEV") {
+      await copyFile(source, destination);
+      await unlink(source);
+    } else {
+      throw error;
+    }
+  }
+}
 
 const app = new Elysia({ adapter: node() })
   .use(
@@ -180,8 +196,7 @@ const app = new Elysia({ adapter: node() })
       if (tmpPath && !isDestinationTmp) {
         // Write to temporary location first, then move
         await writeFile(tmpPath, buffer);
-        const { rename } = await import("fs/promises");
-        await rename(tmpPath, targetPath);
+        await moveFile(tmpPath, targetPath);
 
         // Clean up: remove tmp directory if empty
         try {
