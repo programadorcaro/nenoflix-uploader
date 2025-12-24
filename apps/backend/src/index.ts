@@ -1,9 +1,9 @@
 import { Elysia } from "elysia";
 import { node } from "@elysiajs/node";
 import { cors } from "@elysiajs/cors";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, readdir } from "fs/promises";
 import { join, extname, isAbsolute, resolve, normalize } from "path";
-import { existsSync } from "fs";
+import { existsSync, statSync } from "fs";
 import { homedir } from "os";
 
 const PORT = 8081;
@@ -20,6 +20,60 @@ const app = new Elysia({ adapter: node() })
     })
   )
   .get("/", () => "Hello Elysia")
+  .get("/folders", async (context) => {
+    try {
+      const path = (context.query.path as string) || "";
+
+      if (!path) {
+        return {
+          success: false,
+          error: "Path parameter is required",
+        };
+      }
+
+      let resolvedPath = path.trim();
+
+      if (resolvedPath.startsWith("~/")) {
+        resolvedPath = join(homedir(), resolvedPath.slice(2));
+      } else if (resolvedPath === "~") {
+        resolvedPath = homedir();
+      } else if (isAbsolute(resolvedPath)) {
+        resolvedPath = normalize(resolvedPath);
+      } else {
+        resolvedPath = resolve(process.cwd(), resolvedPath);
+      }
+
+      resolvedPath = normalize(resolvedPath);
+
+      if (!existsSync(resolvedPath)) {
+        return {
+          success: true,
+          folders: [],
+        };
+      }
+
+      const entries = await readdir(resolvedPath);
+      const folders = entries.filter((entry) => {
+        const entryPath = join(resolvedPath, entry);
+        try {
+          return statSync(entryPath).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+
+      return {
+        success: true,
+        folders: folders.sort(),
+      };
+    } catch (error) {
+      console.error("List folders error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  })
   .post("/upload", async (context) => {
     try {
       const formData = await context.request.formData();
@@ -29,12 +83,17 @@ const app = new Elysia({ adapter: node() })
       const destinationPath =
         (formData.get("destinationPath") as string | null) || DEFAULT_TMP_DIR;
 
-      if (!folderName || !fileName || !file) {
+      if (!fileName || !file) {
         return {
           success: false,
-          error: "Missing required fields: folderName, fileName, or file",
+          error: "Missing required fields: fileName or file",
         };
       }
+
+      // folderName é opcional (usado apenas para séries/animes)
+      const sanitizedFolderName = folderName
+        ? folderName.replace(/[^a-zA-Z0-9_-]/g, "")
+        : "";
 
       const fileExtension = extname(file.name).toLowerCase();
       if (!ALLOWED_EXTENSIONS.includes(fileExtension)) {
@@ -43,8 +102,6 @@ const app = new Elysia({ adapter: node() })
           error: `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`,
         };
       }
-
-      const sanitizedFolderName = folderName.replace(/[^a-zA-Z0-9_-]/g, "");
       let sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, "");
 
       // Add extension from original file if not present in fileName
@@ -77,18 +134,18 @@ const app = new Elysia({ adapter: node() })
       // Normalize the path to prevent path traversal attacks
       resolvedDestinationPath = normalize(resolvedDestinationPath);
 
-      if (
-        !sanitizedFolderName ||
-        !sanitizedFileName ||
-        !resolvedDestinationPath
-      ) {
+      if (!sanitizedFileName || !resolvedDestinationPath) {
         return {
           success: false,
-          error: "Invalid folder, file name, or destination path",
+          error: "Invalid file name or destination path",
         };
       }
 
-      const targetDir = join(resolvedDestinationPath, sanitizedFolderName);
+      // Se folderName estiver vazio, arquivo vai direto no destinationPath
+      // Caso contrário, cria pasta intermediária (para séries/animes)
+      const targetDir = sanitizedFolderName
+        ? join(resolvedDestinationPath, sanitizedFolderName)
+        : resolvedDestinationPath;
       const targetPath = join(targetDir, sanitizedFileName);
 
       // Check if destination is the tmp folder
@@ -100,7 +157,9 @@ const app = new Elysia({ adapter: node() })
 
       if (!isDestinationTmp) {
         // Use tmp folder for staging only if destination is not tmp
-        tmpDir = join(process.cwd(), DEFAULT_TMP_DIR, sanitizedFolderName);
+        tmpDir = sanitizedFolderName
+          ? join(process.cwd(), DEFAULT_TMP_DIR, sanitizedFolderName)
+          : join(process.cwd(), DEFAULT_TMP_DIR);
         tmpPath = join(tmpDir, sanitizedFileName);
 
         // Create temporary directory for staging

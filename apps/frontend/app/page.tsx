@@ -1,6 +1,6 @@
 "use client";
 
-import { FileUpload } from "@/components/file-upload";
+import { FileUpload } from "@/components/file-upload/index";
 
 export default function Page() {
   return (
