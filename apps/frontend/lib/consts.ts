@@ -1,1 +1,1 @@
-export const FINAL_PATH = "~/nenoflix-uploads/";
+export const FINAL_PATH = "/mnt/external-hd";

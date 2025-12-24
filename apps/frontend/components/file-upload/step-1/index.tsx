@@ -62,11 +62,11 @@ export function Step1({
     onError(null);
     let basePath = "";
     if (type === "movies") {
-      basePath = `${FINAL_PATH}movies`;
+      basePath = `${FINAL_PATH}/Movies`;
     } else if (type === "series") {
-      basePath = `${FINAL_PATH}series`;
+      basePath = `${FINAL_PATH}/Series`;
     } else if (type === "animes") {
-      basePath = `${FINAL_PATH}animes`;
+      basePath = `${FINAL_PATH}/Animes`;
     }
 
     onDataChange({
