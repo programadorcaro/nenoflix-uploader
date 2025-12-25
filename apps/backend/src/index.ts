@@ -4,12 +4,34 @@ import { cors } from "@elysiajs/cors";
 import { writeFile, mkdir, readdir, copyFile, unlink } from "fs/promises";
 import { join, extname, isAbsolute, resolve, normalize, dirname } from "path";
 import { existsSync, statSync, accessSync, constants } from "fs";
-import { homedir } from "os";
+import { homedir, userInfo } from "os";
 
 const PORT = 8081;
 const DEFAULT_TMP_DIR = "tmp";
 
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
+
+// Helper function to expand environment variables in paths
+function expandEnvVars(path: string): string {
+  // Expand $HOME or ${HOME}
+  path = path.replace(/\$HOME|\$\{HOME\}/g, homedir());
+
+  // Expand $USER or ${USER}
+  const username = userInfo().username;
+  path = path.replace(/\$USER|\$\{USER\}/g, username);
+
+  // Expand any other environment variables
+  path = path.replace(
+    /\$\{([^}]+)\}|\$([a-zA-Z_][a-zA-Z0-9_]*)/g,
+    (match, braced, unbraced) => {
+      const varName = braced || unbraced;
+      const value = process.env[varName];
+      return value || match; // Return original if variable not found
+    }
+  );
+
+  return path;
+}
 
 // Helper function to move files, handling cross-device scenarios
 async function moveFile(source: string, destination: string): Promise<void> {
@@ -183,6 +205,9 @@ const app = new Elysia({ adapter: node() })
 
       let resolvedPath = path.trim();
 
+      // Expand environment variables first (e.g., $HOME, $USER)
+      resolvedPath = expandEnvVars(resolvedPath);
+
       if (resolvedPath.startsWith("~/")) {
         resolvedPath = join(homedir(), resolvedPath.slice(2));
       } else if (resolvedPath === "~") {
@@ -259,8 +284,11 @@ const app = new Elysia({ adapter: node() })
         sanitizedFileName = sanitizedFileName + fileExtension;
       }
 
-      // Handle destination path - support absolute paths and ~ expansion
+      // Handle destination path - support absolute paths, ~ expansion, and env vars
       let resolvedDestinationPath = destinationPath.trim();
+
+      // Expand environment variables first (e.g., $HOME, $USER)
+      resolvedDestinationPath = expandEnvVars(resolvedDestinationPath);
 
       // Expand ~ to home directory
       if (resolvedDestinationPath.startsWith("~/")) {
