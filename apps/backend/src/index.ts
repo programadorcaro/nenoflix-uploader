@@ -49,42 +49,82 @@ async function ensureDirectoryExists(dirPath: string): Promise<void> {
     );
   }
 
-  if (!existsSync(parentDir)) {
-    // For root-level directories (like /mnt), check if we can create them
-    if (parentDir === "/") {
-      // Try to create directly - will fail with clear error if no permissions
-      try {
-        await mkdir(dirPath, { recursive: false });
-        return;
-      } catch (error: any) {
-        if (error.code === "EACCES" || error.code === "EPERM") {
-          throw new Error(
-            `Permission denied: Cannot create directory ${dirPath}. ` +
-              `Please ensure you have permissions to create directories in ${parentDir}. ` +
-              `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
-          );
-        } else if (error.code === "ENOENT") {
-          throw new Error(
-            `Parent directory does not exist: ${parentDir}. ` +
-              `Please ensure the parent directory exists before creating ${dirPath}.`
-          );
-        }
-        throw error;
+  // Special handling for root-level directories (like /mnt)
+  if (parentDir === "/") {
+    // Don't check write permissions on / as it may be read-only (EROFS)
+    // Just try to create the directory directly
+    try {
+      await mkdir(dirPath, { recursive: false });
+      return;
+    } catch (error: any) {
+      if (error.code === "EACCES" || error.code === "EPERM") {
+        throw new Error(
+          `Permission denied: Cannot create directory ${dirPath}. ` +
+            `Please ensure you have permissions to create directories in ${parentDir}. ` +
+            `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
+        );
+      } else if (error.code === "EROFS") {
+        throw new Error(
+          `Read-only file system: Cannot create directory ${dirPath}. ` +
+            `The root filesystem (/) is mounted as read-only. ` +
+            `Please ensure ${dirPath} exists before running the application, or remount the filesystem as read-write. ` +
+            `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
+        );
+      } else if (error.code === "ENOENT") {
+        throw new Error(
+          `Parent directory does not exist: ${parentDir}. ` +
+            `Please ensure the parent directory exists before creating ${dirPath}.`
+        );
       }
+      throw error;
     }
-    // Recursively ensure parent exists first
+  }
+
+  if (!existsSync(parentDir)) {
+    // Check if parent is a root-level directory (like /mnt)
+    // If so, don't try to create it as it may be on a read-only filesystem
+    const parentParentDir = dirname(parentDir);
+    if (parentParentDir === "/") {
+      // Parent is a root-level directory that doesn't exist
+      // Don't try to create it, just return a clear error
+      throw new Error(
+        `Parent directory does not exist: ${parentDir}. ` +
+          `This directory is on the root filesystem which may be read-only. ` +
+          `Please create it manually before running the application: ` +
+          `sudo mkdir -p ${parentDir} && sudo chown $USER:$USER ${parentDir}`
+      );
+    }
+    // Recursively ensure parent exists first (for non-root-level directories)
     await ensureDirectoryExists(parentDir);
   } else {
-    // Check if parent is writable
+    // Check if parent is writable (skip for root directory as it may be read-only)
     try {
       accessSync(parentDir, constants.W_OK);
     } catch (error: any) {
-      throw new Error(
-        `Permission denied: Cannot create directory in ${parentDir}. ` +
-          `Please ensure the parent directory exists and is writable. ` +
-          `You may need to run: sudo chmod 755 ${parentDir} or check ownership. ` +
-          `Original error: ${error.message}`
-      );
+      // Handle read-only filesystem error
+      if (error.code === "EROFS") {
+        // If parent is read-only, check if it's a root-level directory
+        // If so, we can still try to create subdirectories (they might be on a different mount)
+        const parentParentDir = dirname(parentDir);
+        if (parentParentDir === "/") {
+          // Parent is a root-level directory that's read-only
+          // We can still try to create the child directory (it might be on a different filesystem)
+          // The mkdir below will fail with a clearer error if it can't create
+        } else {
+          throw new Error(
+            `Read-only file system: Cannot create directory in ${parentDir}. ` +
+              `The filesystem is mounted as read-only. ` +
+              `Please ensure ${dirPath} exists before running the application.`
+          );
+        }
+      } else {
+        throw new Error(
+          `Permission denied: Cannot create directory in ${parentDir}. ` +
+            `Please ensure the parent directory exists and is writable. ` +
+            `You may need to run: sudo chmod 755 ${parentDir} or check ownership. ` +
+            `Original error: ${error.message}`
+        );
+      }
     }
   }
 
@@ -101,6 +141,13 @@ async function ensureDirectoryExists(dirPath: string): Promise<void> {
       throw new Error(
         `Permission denied: Cannot create directory ${dirPath}. ` +
           `Please check permissions on parent directory ${parentDir}.`
+      );
+    } else if (error.code === "EROFS") {
+      throw new Error(
+        `Read-only file system: Cannot create directory ${dirPath}. ` +
+          `The filesystem containing ${parentDir} is mounted as read-only. ` +
+          `Please ensure ${dirPath} exists before running the application, or remount the filesystem as read-write. ` +
+          `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
       );
     } else if (error.code === "ENOENT") {
       throw new Error(
