@@ -2,8 +2,8 @@ import { Elysia } from "elysia";
 import { node } from "@elysiajs/node";
 import { cors } from "@elysiajs/cors";
 import { writeFile, mkdir, readdir, copyFile, unlink } from "fs/promises";
-import { join, extname, isAbsolute, resolve, normalize } from "path";
-import { existsSync, statSync } from "fs";
+import { join, extname, isAbsolute, resolve, normalize, dirname } from "path";
+import { existsSync, statSync, accessSync, constants } from "fs";
 import { homedir } from "os";
 
 const PORT = 8081;
@@ -21,6 +21,92 @@ async function moveFile(source: string, destination: string): Promise<void> {
     if (error.code === "EXDEV") {
       await copyFile(source, destination);
       await unlink(source);
+    } else {
+      throw error;
+    }
+  }
+}
+
+// Helper function to safely create directories, checking parent permissions
+async function ensureDirectoryExists(dirPath: string): Promise<void> {
+  if (existsSync(dirPath)) {
+    // Check if it's actually a directory
+    const stats = statSync(dirPath);
+    if (!stats.isDirectory()) {
+      throw new Error(`Path exists but is not a directory: ${dirPath}`);
+    }
+    return;
+  }
+
+  // Check if parent directory exists and is writable
+  const parentDir = dirname(dirPath);
+
+  // Don't try to create root directory itself
+  if (parentDir === dirPath) {
+    throw new Error(
+      `Cannot create root directory: ${dirPath}. ` +
+        `Please ensure the directory path is valid.`
+    );
+  }
+
+  if (!existsSync(parentDir)) {
+    // For root-level directories (like /mnt), check if we can create them
+    if (parentDir === "/") {
+      // Try to create directly - will fail with clear error if no permissions
+      try {
+        await mkdir(dirPath, { recursive: false });
+        return;
+      } catch (error: any) {
+        if (error.code === "EACCES" || error.code === "EPERM") {
+          throw new Error(
+            `Permission denied: Cannot create directory ${dirPath}. ` +
+              `Please ensure you have permissions to create directories in ${parentDir}. ` +
+              `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
+          );
+        } else if (error.code === "ENOENT") {
+          throw new Error(
+            `Parent directory does not exist: ${parentDir}. ` +
+              `Please ensure the parent directory exists before creating ${dirPath}.`
+          );
+        }
+        throw error;
+      }
+    }
+    // Recursively ensure parent exists first
+    await ensureDirectoryExists(parentDir);
+  } else {
+    // Check if parent is writable
+    try {
+      accessSync(parentDir, constants.W_OK);
+    } catch (error: any) {
+      throw new Error(
+        `Permission denied: Cannot create directory in ${parentDir}. ` +
+          `Please ensure the parent directory exists and is writable. ` +
+          `You may need to run: sudo chmod 755 ${parentDir} or check ownership. ` +
+          `Original error: ${error.message}`
+      );
+    }
+  }
+
+  // Now create the directory
+  try {
+    await mkdir(dirPath, { recursive: false });
+  } catch (error: any) {
+    if (error.code === "EEXIST") {
+      // Directory was created by another process, verify it exists
+      if (!existsSync(dirPath)) {
+        throw error;
+      }
+    } else if (error.code === "EACCES" || error.code === "EPERM") {
+      throw new Error(
+        `Permission denied: Cannot create directory ${dirPath}. ` +
+          `Please check permissions on parent directory ${parentDir}.`
+      );
+    } else if (error.code === "ENOENT") {
+      throw new Error(
+        `Parent directory does not exist: ${parentDir}. ` +
+          `Please ensure the parent directory exists before creating ${dirPath}.`
+      );
     } else {
       throw error;
     }
@@ -180,15 +266,11 @@ const app = new Elysia({ adapter: node() })
         tmpPath = join(tmpDir, sanitizedFileName);
 
         // Create temporary directory for staging
-        if (!existsSync(tmpDir)) {
-          await mkdir(tmpDir, { recursive: true });
-        }
+        await ensureDirectoryExists(tmpDir);
       }
 
       // Create final destination directory
-      if (!existsSync(targetDir)) {
-        await mkdir(targetDir, { recursive: true });
-      }
+      await ensureDirectoryExists(targetDir);
 
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
