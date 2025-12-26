@@ -6,7 +6,7 @@ import { join, extname, isAbsolute, resolve, normalize, dirname } from "path";
 import { existsSync, statSync, accessSync, constants } from "fs";
 import { homedir, userInfo } from "os";
 
-const PORT = 8081;
+const PORT = 8098;
 const DEFAULT_TMP_DIR = "tmp";
 
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];

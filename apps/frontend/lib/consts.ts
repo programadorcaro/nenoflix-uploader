@@ -1,1 +1,1 @@
-export const FINAL_PATH = `/mnt/external-hd`;
+export const FINAL_PATH = `/Volumes/WD_BLACK`;
