@@ -68,6 +68,58 @@ export function Step3({
     step1Data.subFolderName,
   ]);
 
+  // Formata o caminho para exibir apenas a parte relevante
+  const displayPath = React.useMemo(() => {
+    if (!finalFilePath) return "";
+
+    // Extrair apenas a parte relevante baseado no tipo de conteúdo
+    if (step1Data.contentType === "movies") {
+      // Para filmes: apenas o nome da pasta base (Movies)
+      const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
+      const moviesIndex = pathParts.findIndex(
+        (part) => part.toLowerCase() === "movies"
+      );
+      if (moviesIndex !== -1) {
+        return `/${pathParts[moviesIndex]}`;
+      }
+      // Se não encontrar "Movies", pega a última pasta antes do arquivo
+      if (pathParts.length >= 2) {
+        return `/${pathParts[pathParts.length - 2]}`;
+      }
+      return finalFilePath;
+    } else if (
+      step1Data.contentType === "series" ||
+      step1Data.contentType === "animes"
+    ) {
+      // Para séries/animes: pasta base + pasta criada
+      const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
+      const contentType =
+        step1Data.contentType === "series" ? "Series" : "Animes";
+      const contentTypeIndex = pathParts.findIndex(
+        (part) =>
+          part === contentType ||
+          part === contentType.toLowerCase() ||
+          part.toLowerCase() === contentType.toLowerCase()
+      );
+
+      if (contentTypeIndex !== -1 && folderName) {
+        // Retorna /Animes/{pasta} ou /Series/{pasta}
+        return `/${pathParts[contentTypeIndex]}/${folderName}`;
+      } else if (contentTypeIndex !== -1) {
+        // Se não houver folderName, apenas a pasta base
+        return `/${pathParts[contentTypeIndex]}`;
+      }
+      // Fallback: pega as duas últimas pastas antes do arquivo
+      if (pathParts.length >= 2) {
+        const lastTwoParts = pathParts.slice(-2);
+        return `/${lastTwoParts[0]}`;
+      }
+      return finalFilePath;
+    }
+
+    return finalFilePath;
+  }, [finalFilePath, step1Data.contentType, folderName]);
+
   // Copia o fileName do Step 2 para o Step 3 quando entra no Step 3
   // O nome já vem do Step 2 através do handleNextStep, mas garantimos aqui também
   React.useEffect(() => {
@@ -206,16 +258,16 @@ export function Step3({
       <div className="space-y-6 relative">
         <div className="text-center py-8 sm:py-12">
           <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
-            <div className="relative">
+            <div className="relative w-full max-w-32 aspect-square mx-auto">
               <Image
                 src="/sucess.jpg"
-                alt="Sucesso"
+                alt="Erro"
                 width={400}
                 height={300}
                 className="w-full h-auto object-cover rounded-2xl shadow-2xl"
                 priority
               />
-              <div className="absolute inset-0 bg-primary/10 rounded-2xl blur-xl -z-10" />
+              <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
             </div>
           </div>
           <div className="space-y-6 max-w-2xl mx-auto">
@@ -240,13 +292,13 @@ export function Step3({
                 </div>
               )}
 
-              {finalFilePath && (
+              {displayPath && (
                 <div className="space-y-1">
                   <p className="text-xs sm:text-sm text-muted-foreground font-medium">
                     Localização
                   </p>
                   <p className="text-sm sm:text-base font-mono text-foreground break-all bg-muted/50 p-2 rounded-md">
-                    {finalFilePath}
+                    {displayPath}
                   </p>
                 </div>
               )}
@@ -274,7 +326,7 @@ export function Step3({
             <div className="relative w-full max-w-32 aspect-square mx-auto">
               <Image
                 src="/error.jpg"
-                alt="Erro"
+                alt="Erro no upload"
                 width={400}
                 height={300}
                 className="w-full h-auto object-cover rounded-2xl shadow-2xl"
@@ -334,15 +386,16 @@ export function Step3({
         <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-6 sm:p-8">
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="shrink-0 max-w-32 sm:max-w-40">
-              <div className="relative">
+              <div className="relative w-full max-w-32 aspect-square mx-auto">
                 <Image
                   src="/loading.jpg"
                   alt="Carregando"
                   width={400}
                   height={300}
-                  className="w-full h-auto object-cover rounded-2xl shadow-xl"
+                  className="w-full h-auto object-cover rounded-2xl shadow-2xl"
+                  priority
                 />
-                <div className="absolute inset-0 bg-primary/10 rounded-2xl blur-xl -z-10" />
+                <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
               </div>
             </div>
             <div className="flex-1 w-full space-y-4">
