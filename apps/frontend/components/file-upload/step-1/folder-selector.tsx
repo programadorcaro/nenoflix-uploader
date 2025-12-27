@@ -41,20 +41,21 @@ export function FolderSelector({
   };
 
   return (
-    <div className="space-y-4 pt-4 border-t">
+    <div className="space-y-5 sm:space-y-6 pt-6 border-t border-border">
       <Field>
-        <FieldLabel htmlFor="sub-folder-name">Nome da Pasta</FieldLabel>
+        <FieldLabel htmlFor="sub-folder-name" className="text-base font-semibold mb-3">Nome da Pasta</FieldLabel>
         <Input
           id="sub-folder-name"
           placeholder="Ex: breaking-bad, naruto"
           value={subFolderName}
           onChange={handleSubFolderNameChange}
           disabled={disabled}
+          className="text-base"
         />
       </Field>
-      <div className="text-sm text-muted-foreground text-center">ou</div>
+      <div className="text-sm text-muted-foreground text-center font-medium">ou</div>
       <Field>
-        <FieldLabel htmlFor="existing-folder">
+        <FieldLabel htmlFor="existing-folder" className="text-base font-semibold mb-3">
           Selecionar Pasta Existente
         </FieldLabel>
         <Select
@@ -62,7 +63,7 @@ export function FolderSelector({
           onValueChange={handleExistingFolderChange}
           disabled={disabled || isLoadingFolders}
         >
-          <SelectTrigger id="existing-folder">
+          <SelectTrigger id="existing-folder" className="text-base">
             <SelectValue
               placeholder={
                 isLoadingFolders ? "Carregando..." : "Selecione uma pasta"

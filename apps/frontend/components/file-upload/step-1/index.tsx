@@ -93,7 +93,7 @@ export function Step1({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 sm:space-y-8">
       <ContentTypeSelector
         selectedType={data.contentType}
         onSelect={handleContentTypeSelect}
@@ -117,17 +117,18 @@ export function Step1({
       )}
 
       {error && (
-        <div className="text-sm text-destructive bg-destructive/10 p-2 rounded-md">
+        <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg border border-destructive/20">
           {error}
         </div>
       )}
 
-      <Field orientation="horizontal">
+      <Field orientation="horizontal" className="pt-4">
         <Button
           onClick={handleNext}
           disabled={!data.contentType || isUploading}
           type="button"
-          className="w-full"
+          className="w-full sm:w-auto sm:min-w-[200px] sm:ml-auto"
+          size="lg"
         >
           Próximo
         </Button>

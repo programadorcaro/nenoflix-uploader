@@ -37,6 +37,7 @@ export function FileUpload({
     },
     step2: {
       selectedFile: null,
+      fileName: "",
     },
     step3: {
       folderName: "",
@@ -82,7 +83,20 @@ export function FileUpload({
   };
 
   const handleNextStep = () => {
-    setState((prev) => ({ ...prev, error: null }));
+    setState((prev) => {
+      // Quando avança do Step 2 para o Step 3, copia o fileName do Step 2 para o Step 3
+      if (prev.step2.fileName && currentStep === 2) {
+        return {
+          ...prev,
+          error: null,
+          step3: {
+            ...prev.step3,
+            fileName: prev.step2.fileName,
+          },
+        };
+      }
+      return { ...prev, error: null };
+    });
     setCurrentStep((prev) => prev + 1);
   };
 
@@ -101,6 +115,7 @@ export function FileUpload({
       },
       step2: {
         selectedFile: null,
+        fileName: "",
       },
       step3: {
         folderName: "",
@@ -114,18 +129,10 @@ export function FileUpload({
       timeElapsed: undefined,
       timeRemaining: undefined,
       uploadSpeed: undefined,
+      finalFilePath: undefined,
     });
     setCurrentStep(1);
   }, []);
-
-  React.useEffect(() => {
-    if (state.uploadStatus === "success") {
-      const timer = setTimeout(() => {
-        handleReset();
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [state.uploadStatus, handleReset]);
 
   const handleUpload = async () => {
     const { step1, step2, step3 } = state;
@@ -243,15 +250,23 @@ export function FileUpload({
       // Clear session state
       stateManager.clear();
 
+      // Construir o caminho completo do arquivo
+      let finalFilePath = destinationPath;
+      if (folderName) {
+        finalFilePath = `${destinationPath}/${folderName}`;
+      }
+      finalFilePath = `${finalFilePath}/${fileName}`;
+
       setState((prev) => ({
         ...prev,
         progress: 100,
         isUploading: false,
         uploadStatus: "success",
+        finalFilePath: completeResult.filePath || finalFilePath,
+        // Manter o fileName no step3 para exibir na tela de sucesso
         step3: {
-          folderName: "",
-          fileName: "",
-          selectedFile: null,
+          ...prev.step3,
+          fileName: fileName,
         },
       }));
 
@@ -275,24 +290,105 @@ export function FileUpload({
     }
   };
 
+  const steps = [
+    {
+      number: 1,
+      label: "Tipo de Conteúdo",
+      active: currentStep === 1,
+      completed: currentStep > 1,
+    },
+    {
+      number: 2,
+      label: "Selecionar Arquivo",
+      active: currentStep === 2,
+      completed: currentStep > 2,
+    },
+    {
+      number: 3,
+      label: "Upload",
+      active: currentStep === 3,
+      completed: currentStep > 3,
+    },
+  ];
+
   return (
-    <Card className="w-full max-w-md">
+    <Card className="w-full">
       <CardHeader>
-        <div className="mb-4 flex justify-center">
+        <div className="mb-6 flex justify-center">
           <Image
-            src="/logo.png"
+            src="/logo-rosa.png"
             alt="Logo"
-            width={120}
-            height={48}
-            className="h-12 w-auto"
+            width={140}
+            height={56}
+            className="h-14 w-auto"
+            priority
           />
         </div>
-        <CardTitle>File Upload</CardTitle>
-        <CardDescription>
+        <CardTitle className="text-center text-2xl mb-2">File Upload</CardTitle>
+        <CardDescription className="text-center">
           Upload files (.mkv, .mp4, .srt) to the server
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {/* Stepper */}
+        <div className="mb-8 sm:mb-10">
+          <div className="flex items-center justify-between">
+            {steps.map((step, index) => (
+              <React.Fragment key={step.number}>
+                <div className="flex flex-col items-center flex-1 min-w-0">
+                  <div
+                    className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 transition-all ${
+                      step.completed
+                        ? "bg-primary border-primary text-primary-foreground"
+                        : step.active
+                          ? "border-primary bg-primary/10 text-primary shadow-md shadow-primary/20"
+                          : "border-muted-foreground/30 bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {step.completed ? (
+                      <svg
+                        className="w-5 h-5 sm:w-6 sm:h-6"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2.5}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    ) : (
+                      <span className="text-sm sm:text-base font-semibold">
+                        {step.number}
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className={`mt-2 sm:mt-3 text-xs sm:text-sm font-medium text-center hidden sm:block px-1 ${
+                      step.active
+                        ? "text-primary"
+                        : step.completed
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                    }`}
+                  >
+                    {step.label}
+                  </span>
+                </div>
+                {index < steps.length - 1 && (
+                  <div
+                    className={`flex-1 h-0.5 mx-2 sm:mx-4 transition-colors ${
+                      step.completed ? "bg-primary" : "bg-muted-foreground/30"
+                    }`}
+                  />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
         <FieldGroup>
           {currentStep === 1 && (
             <Step1
@@ -325,8 +421,8 @@ export function FileUpload({
               timeElapsed={state.timeElapsed}
               timeRemaining={state.timeRemaining}
               uploadSpeed={state.uploadSpeed}
+              finalFilePath={state.finalFilePath}
               onDataChange={updateStep3Data}
-              onBack={handleBackStep}
               onUpload={handleUpload}
               onReset={handleReset}
             />

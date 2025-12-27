@@ -9,6 +9,7 @@ export interface Step1Data {
 
 export interface Step2Data {
   selectedFile: File | null;
+  fileName: string;
 }
 
 export interface Step3Data {
@@ -30,5 +31,6 @@ export interface FileUploadState {
   timeElapsed?: number;
   timeRemaining?: number | null;
   uploadSpeed?: number;
+  finalFilePath?: string;
 }
 

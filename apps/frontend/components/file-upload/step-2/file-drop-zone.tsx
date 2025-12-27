@@ -120,7 +120,7 @@ export function FileDropZone({
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                <div className="flex-shrink-0 w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
+                <div className="shrink-0 w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
                   <span className="text-xs font-semibold text-primary">
                     {getFileExtension(file.name)}
                   </span>
@@ -161,7 +161,7 @@ export function FileDropZone({
               type="button"
               onClick={onFileRemove}
               disabled={disabled}
-              className="flex-shrink-0 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
               aria-label="Remover arquivo"
             >
               <HugeiconsIcon
@@ -191,9 +191,9 @@ export function FileDropZone({
       onDrop={handleDrop}
       onClick={handleClick}
       className={cn(
-        "relative border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+        "relative border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-200 cursor-pointer",
         isDragging
-          ? "border-primary bg-primary/5"
+          ? "border-primary bg-primary/5 scale-[1.02]"
           : "border-border hover:border-primary/50 hover:bg-muted/50",
         disabled && "opacity-50 cursor-not-allowed"
       )}
@@ -206,21 +206,21 @@ export function FileDropZone({
         disabled={disabled}
         className="hidden"
       />
-      <div className="space-y-2">
-        <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="mx-auto w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-muted flex items-center justify-center">
           <HugeiconsIcon
             icon={CloudUploadIcon}
-            className="h-6 w-6 text-muted-foreground"
+            className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground"
             strokeWidth={2}
           />
         </div>
         <div>
-          <p className="text-sm font-medium">Arraste e solte o arquivo aqui</p>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-base sm:text-lg font-semibold">Arraste e solte o arquivo aqui</p>
+          <p className="text-sm text-muted-foreground mt-2">
             ou clique para selecionar
           </p>
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs sm:text-sm text-muted-foreground">
           Formatos permitidos: {ALLOWED_EXTENSIONS.join(", ")}
         </p>
       </div>
