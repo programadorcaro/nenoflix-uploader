@@ -176,6 +176,7 @@ export function FileUpload({
           folderName,
           destinationPath,
           totalSize: file.size,
+          originalFileName: file.name,
         }),
       });
 
@@ -217,6 +218,12 @@ export function FileUpload({
 
       // Upload all chunks
       await chunker.uploadAll();
+
+      // Update UI to show "enviando..." during completion
+      setState((prev) => ({
+        ...prev,
+        uploadStatus: "completing",
+      }));
 
       // Complete upload
       const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {

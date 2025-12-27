@@ -17,7 +17,7 @@ export interface Step3Data {
   selectedFile: File | null;
 }
 
-export type UploadStatus = "idle" | "uploading" | "success" | "error";
+export type UploadStatus = "idle" | "uploading" | "completing" | "success" | "error";
 
 export interface FileUploadState {
   step1: Step1Data;

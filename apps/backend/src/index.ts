@@ -316,9 +316,16 @@ const app = new Elysia({ adapter: node() })
         destinationPath?: string;
         totalSize?: number;
         chunkSize?: number;
+        originalFileName?: string;
       };
-      const { fileName, folderName, destinationPath, totalSize, chunkSize } =
-        body;
+      const {
+        fileName,
+        folderName,
+        destinationPath,
+        totalSize,
+        chunkSize,
+        originalFileName,
+      } = body;
 
       if (!totalSize || totalSize <= 0) {
         return {
@@ -338,9 +345,13 @@ const app = new Elysia({ adapter: node() })
       }
 
       const sanitizedFolderName = sanitizeFolderName(folderName ?? null);
-      const fileExtension = extname(fileName).toLowerCase();
 
-      if (!ALLOWED_EXTENSIONS.includes(fileExtension)) {
+      // Get extension from original file name if provided, otherwise from fileName
+      const originalExtension = originalFileName
+        ? extname(originalFileName).toLowerCase()
+        : extname(fileName).toLowerCase();
+
+      if (!ALLOWED_EXTENSIONS.includes(originalExtension)) {
         return {
           success: false,
           error: `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`,
@@ -348,8 +359,9 @@ const app = new Elysia({ adapter: node() })
       }
 
       let sanitizedFileName = sanitizeFileName(fileName);
-      if (!sanitizedFileName.toLowerCase().endsWith(fileExtension)) {
-        sanitizedFileName = sanitizedFileName + fileExtension;
+      // Always append the original extension to ensure file has extension
+      if (!sanitizedFileName.toLowerCase().endsWith(originalExtension)) {
+        sanitizedFileName = sanitizedFileName + originalExtension;
       }
 
       const resolvedDestinationPath = resolveDestinationPath(

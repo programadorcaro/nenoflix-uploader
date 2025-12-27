@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Progress } from "@/components/ui/progress";
+import confetti from "canvas-confetti";
 import type { Step3Data, Step2Data, Step1Data } from "./types";
 
 function formatTime(seconds: number): string {
@@ -29,7 +30,7 @@ interface Step3Props {
   error: string | null;
   progress: number;
   isUploading: boolean;
-  uploadStatus: "idle" | "uploading" | "success" | "error";
+  uploadStatus: "idle" | "uploading" | "completing" | "success" | "error";
   timeElapsed?: number;
   timeRemaining?: number | null;
   uploadSpeed?: number;
@@ -107,9 +108,48 @@ export function Step3({
     folderName,
   ]);
 
+  React.useEffect(() => {
+    if (uploadStatus === "success") {
+      // Fire confetti animation with fireworks effect
+      const duration = 3 * 1000;
+      const animationEnd = Date.now() + duration;
+      const defaults = {
+        startVelocity: 30,
+        spread: 360,
+        ticks: 60,
+        zIndex: 1000,
+      };
+
+      const randomInRange = (min: number, max: number) =>
+        Math.random() * (max - min) + min;
+
+      const interval = window.setInterval(() => {
+        const timeLeft = animationEnd - Date.now();
+
+        if (timeLeft <= 0) {
+          return clearInterval(interval);
+        }
+
+        const particleCount = 50 * (timeLeft / duration);
+        confetti({
+          ...defaults,
+          particleCount,
+          origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
+        });
+        confetti({
+          ...defaults,
+          particleCount,
+          origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
+        });
+      }, 250);
+
+      return () => clearInterval(interval);
+    }
+  }, [uploadStatus]);
+
   if (uploadStatus === "success") {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 relative">
         <div className="text-center py-8">
           <div className="mx-auto mb-4 aspect-square w-full">
             <Image
@@ -201,7 +241,7 @@ export function Step3({
         />
       </Field>
 
-      {isUploading && (
+      {(isUploading || uploadStatus === "completing") && (
         <Field>
           <div className="mb-4 aspect-square w-full">
             <Image
@@ -212,26 +252,36 @@ export function Step3({
               className="w-full h-full object-cover rounded-lg"
             />
           </div>
-          <FieldLabel>Progresso do Upload</FieldLabel>
-          <Progress value={progress} />
+          <FieldLabel>
+            {uploadStatus === "completing" ? "Finalizando..." : "Progresso do Upload"}
+          </FieldLabel>
+          <Progress value={uploadStatus === "completing" ? 100 : progress} />
           <div className="mt-2 space-y-1">
-            <p className="text-sm text-muted-foreground">
-              {Math.round(progress)}% enviado
-            </p>
-            {uploadSpeed !== undefined && uploadSpeed > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Velocidade: {(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
+            {uploadStatus === "completing" ? (
+              <p className="text-sm text-muted-foreground">
+                Enviando arquivo...
               </p>
-            )}
-            {timeElapsed !== undefined && (
-              <p className="text-xs text-muted-foreground">
-                Tempo decorrido: {formatTime(timeElapsed)}
-              </p>
-            )}
-            {timeRemaining !== null && timeRemaining !== undefined && (
-              <p className="text-xs font-medium text-primary">
-                Tempo restante: {formatTime(timeRemaining)}
-              </p>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  {Math.round(progress)}% enviado
+                </p>
+                {uploadSpeed !== undefined && uploadSpeed > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Velocidade: {(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
+                  </p>
+                )}
+                {timeElapsed !== undefined && (
+                  <p className="text-xs text-muted-foreground">
+                    Tempo decorrido: {formatTime(timeElapsed)}
+                  </p>
+                )}
+                {timeRemaining !== null && timeRemaining !== undefined && (
+                  <p className="text-xs font-medium text-primary">
+                    Tempo restante: {formatTime(timeRemaining)}
+                  </p>
+                )}
+              </>
             )}
           </div>
         </Field>
