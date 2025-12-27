@@ -132,8 +132,10 @@ export class UploadChunker {
     for (const status of this.chunkStatuses.values()) {
       if (status.status === "completed") {
         const chunk = this.chunks[status.index];
-        uploadedBytes += chunk.size;
-        chunksCompleted++;
+        if (chunk) {
+          uploadedBytes += chunk.size;
+          chunksCompleted++;
+        }
       }
     }
 
@@ -277,6 +279,10 @@ export class UploadChunker {
         const chunk = this.chunks[chunkIndex];
         const status = this.chunkStatuses.get(chunkIndex)!;
 
+        if (!chunk) {
+          throw new Error(`Chunk ${chunkIndex} not found`);
+        }
+
         if (status.retries >= MAX_RETRIES) {
           throw new Error(
             `Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries`
@@ -322,8 +328,10 @@ export class UploadChunker {
     for (const status of this.chunkStatuses.values()) {
       if (status.status === "completed") {
         const chunk = this.chunks[status.index];
-        uploadedBytes += chunk.size;
-        chunksCompleted++;
+        if (chunk) {
+          uploadedBytes += chunk.size;
+          chunksCompleted++;
+        }
       }
     }
 

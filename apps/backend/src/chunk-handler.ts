@@ -2,7 +2,7 @@ import { createWriteStream, promises as fs } from "fs";
 import { dirname } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import type { UploadSession } from "./upload-manager";
+import type { UploadSession } from "./upload-manager.js";
 
 export interface ChunkUploadResult {
   success: boolean;
