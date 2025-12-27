@@ -13,6 +13,7 @@ import {
 import { Step1 } from "./step-1";
 import { Step2 } from "./step-2";
 import { Step3 } from "./step-3";
+import { MultipleUpload } from "./multiple";
 import type { FileUploadState, Step1Data, Step2Data, Step3Data } from "./types";
 import { BACKEND_URL } from "./constants";
 import { UploadChunker } from "@/lib/upload-chunker";
@@ -34,6 +35,7 @@ export function FileUpload({
       baseDestinationPath: "",
       subFolderName: "",
       selectedExistingFolder: "",
+      useMultipleUpload: false,
     },
     step2: {
       selectedFile: null,
@@ -401,13 +403,30 @@ export function FileUpload({
             />
           )}
           {currentStep === 2 && (
-            <Step2
-              data={state.step2}
-              isUploading={state.isUploading}
-              onDataChange={updateStep2Data}
-              onBack={handleBackStep}
-              onNext={handleNextStep}
-            />
+            <>
+              {state.step1.useMultipleUpload &&
+              (state.step1.contentType === "series" ||
+                state.step1.contentType === "animes") ? (
+                <MultipleUpload
+                  folderName={
+                    state.step1.selectedExistingFolder ||
+                    state.step1.subFolderName.trim()
+                  }
+                  destinationPath={getFinalDestinationPath()}
+                  contentType={state.step1.contentType}
+                  onComplete={onComplete}
+                  onReset={handleReset}
+                />
+              ) : (
+                <Step2
+                  data={state.step2}
+                  isUploading={state.isUploading}
+                  onDataChange={updateStep2Data}
+                  onBack={handleBackStep}
+                  onNext={handleNextStep}
+                />
+              )}
+            </>
           )}
           {currentStep === 3 && (
             <Step3

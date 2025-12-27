@@ -5,6 +5,7 @@ export interface Step1Data {
   baseDestinationPath: string;
   subFolderName: string;
   selectedExistingFolder: string;
+  useMultipleUpload?: boolean; // Para séries/animes: usar upload múltiplo
 }
 
 export interface Step2Data {
