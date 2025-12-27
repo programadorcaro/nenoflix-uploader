@@ -2,14 +2,36 @@ import { Elysia } from "elysia";
 import { node } from "@elysiajs/node";
 import { cors } from "@elysiajs/cors";
 import { writeFile, mkdir, readdir, copyFile, unlink } from "fs/promises";
+import { createWriteStream } from "fs";
 import { join, extname, isAbsolute, resolve, normalize, dirname } from "path";
 import { existsSync, statSync, accessSync, constants } from "fs";
 import { homedir, userInfo } from "os";
+import { randomUUID } from "crypto";
+import { uploadManager } from "./upload-manager.js";
+import { writeChunk, validateFileIntegrity } from "./chunk-handler.js";
 
 const PORT = 8098;
 const DEFAULT_TMP_DIR = "tmp";
+const MIN_CHUNK_SIZE = 20 * 1024 * 1024; // 20MB minimum
+const MAX_CHUNK_SIZE = 100 * 1024 * 1024; // 100MB maximum
+const TARGET_CHUNKS = 200; // Target number of chunks for optimal performance
 
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
+
+function calculateOptimalChunkSize(totalSize: number): number {
+  const idealChunkSize = Math.floor(totalSize / TARGET_CHUNKS);
+
+  if (idealChunkSize < MIN_CHUNK_SIZE) {
+    return MIN_CHUNK_SIZE;
+  }
+
+  if (idealChunkSize > MAX_CHUNK_SIZE) {
+    return MAX_CHUNK_SIZE;
+  }
+
+  // Round to nearest MB for cleaner numbers
+  return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
+}
 
 // Helper function to expand environment variables in paths
 function expandEnvVars(path: string): string {
@@ -182,6 +204,43 @@ async function ensureDirectoryExists(dirPath: string): Promise<void> {
   }
 }
 
+function sanitizeFileName(fileName: string): string {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, "");
+}
+
+function sanitizeFolderName(folderName: string | null): string {
+  return folderName ? folderName.replace(/[^a-zA-Z0-9_-]/g, "") : "";
+}
+
+function resolveDestinationPath(destinationPath: string): string {
+  let resolved = destinationPath.trim();
+  resolved = expandEnvVars(resolved);
+
+  if (resolved.startsWith("~/")) {
+    resolved = join(homedir(), resolved.slice(2));
+  } else if (resolved === "~") {
+    resolved = homedir();
+  } else if (isAbsolute(resolved)) {
+    resolved = normalize(resolved);
+  } else {
+    resolved = resolve(process.cwd(), resolved);
+  }
+
+  return normalize(resolved);
+}
+
+function buildTargetPath(
+  destinationPath: string,
+  folderName: string,
+  fileName: string
+): { targetDir: string; targetPath: string } {
+  const targetDir = folderName
+    ? join(destinationPath, folderName)
+    : destinationPath;
+  const targetPath = join(targetDir, fileName);
+  return { targetDir, targetPath };
+}
+
 const app = new Elysia({ adapter: node() })
   .use(
     cors({
@@ -243,6 +302,286 @@ const app = new Elysia({ adapter: node() })
       };
     } catch (error) {
       console.error("List folders error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  })
+  .post("/upload/init", async (context) => {
+    try {
+      const body = (await context.request.json()) as {
+        fileName?: string;
+        folderName?: string | null;
+        destinationPath?: string;
+        totalSize?: number;
+        chunkSize?: number;
+      };
+      const { fileName, folderName, destinationPath, totalSize, chunkSize } =
+        body;
+
+      if (!totalSize || totalSize <= 0) {
+        return {
+          success: false,
+          error: "Invalid totalSize",
+        };
+      }
+
+      const optimalChunkSize =
+        chunkSize || calculateOptimalChunkSize(totalSize);
+
+      if (!fileName || !totalSize) {
+        return {
+          success: false,
+          error: "Missing required fields: fileName, totalSize",
+        };
+      }
+
+      const sanitizedFolderName = sanitizeFolderName(folderName ?? null);
+      const fileExtension = extname(fileName).toLowerCase();
+
+      if (!ALLOWED_EXTENSIONS.includes(fileExtension)) {
+        return {
+          success: false,
+          error: `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`,
+        };
+      }
+
+      let sanitizedFileName = sanitizeFileName(fileName);
+      if (!sanitizedFileName.toLowerCase().endsWith(fileExtension)) {
+        sanitizedFileName = sanitizedFileName + fileExtension;
+      }
+
+      const resolvedDestinationPath = resolveDestinationPath(
+        destinationPath || DEFAULT_TMP_DIR
+      );
+      const { targetDir, targetPath } = buildTargetPath(
+        resolvedDestinationPath,
+        sanitizedFolderName,
+        sanitizedFileName
+      );
+
+      await ensureDirectoryExists(targetDir);
+
+      const uploadId = randomUUID();
+      const tempFilePath = join(
+        process.cwd(),
+        DEFAULT_TMP_DIR,
+        `upload_${uploadId}_${sanitizedFileName}`
+      );
+
+      await ensureDirectoryExists(dirname(tempFilePath));
+
+      const session = uploadManager.createSession(
+        uploadId,
+        sanitizedFileName,
+        sanitizedFolderName,
+        resolvedDestinationPath,
+        totalSize,
+        optimalChunkSize,
+        tempFilePath
+      );
+
+      return {
+        success: true,
+        uploadId: session.uploadId,
+        totalChunks: session.totalChunks,
+        chunkSize: session.chunkSize,
+      };
+    } catch (error) {
+      console.error("Upload init error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  })
+  .post("/upload/chunk", async (context) => {
+    try {
+      const formData = await context.request.formData();
+      const uploadId = formData.get("uploadId") as string | null;
+      const chunkIndexStr = formData.get("chunkIndex") as string | null;
+      const chunkData = formData.get("chunk") as File | null;
+
+      if (!uploadId || chunkIndexStr === null || !chunkData) {
+        return {
+          success: false,
+          error: "Missing required fields: uploadId, chunkIndex, chunk",
+        };
+      }
+
+      const chunkIndex = parseInt(chunkIndexStr, 10);
+      if (isNaN(chunkIndex) || chunkIndex < 0) {
+        return {
+          success: false,
+          error: "Invalid chunkIndex",
+        };
+      }
+
+      const session = uploadManager.getSession(uploadId);
+      if (!session) {
+        return {
+          success: false,
+          error: "Upload session not found",
+        };
+      }
+
+      if (session.receivedChunks.has(chunkIndex)) {
+        return {
+          success: true,
+          chunkIndex,
+          message: "Chunk already received",
+        };
+      }
+
+      const chunkStream = chunkData.stream();
+      const result = await writeChunk(session, chunkIndex, chunkStream);
+
+      if (result.success) {
+        uploadManager.markChunkReceived(uploadId, chunkIndex);
+      }
+
+      return {
+        success: result.success,
+        chunkIndex: result.chunkIndex,
+        bytesWritten: result.bytesWritten,
+        error: result.error,
+      };
+    } catch (error) {
+      console.error("Chunk upload error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  })
+  .post("/upload/complete", async (context) => {
+    try {
+      const body = (await context.request.json()) as {
+        uploadId?: string;
+      };
+      const { uploadId } = body;
+
+      if (!uploadId) {
+        return {
+          success: false,
+          error: "Missing required field: uploadId",
+        };
+      }
+
+      const session = uploadManager.getSession(uploadId);
+      if (!session) {
+        return {
+          success: false,
+          error: "Upload session not found",
+        };
+      }
+
+      if (!uploadManager.isComplete(uploadId)) {
+        const status = uploadManager.getSessionStatus(uploadId);
+        return {
+          success: false,
+          error: "Upload not complete",
+          missingChunks: status?.missingChunks || [],
+        };
+      }
+
+      const { targetDir, targetPath } = buildTargetPath(
+        session.destinationPath,
+        session.folderName,
+        session.fileName
+      );
+
+      await ensureDirectoryExists(targetDir);
+
+      const tmpBasePath = resolve(process.cwd(), DEFAULT_TMP_DIR);
+      const isDestinationTmp = session.destinationPath === tmpBasePath;
+
+      // Validate integrity before moving
+      const integrity = await validateFileIntegrity(session);
+      if (!integrity.valid) {
+        console.error(
+          `File integrity check failed. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`
+        );
+        return {
+          success: false,
+          error: `File size mismatch. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`,
+        };
+      }
+
+      // If destination is tmp and paths match, no need to move
+      if (isDestinationTmp && session.tempFilePath === targetPath) {
+        // File is already in the right place
+      } else {
+        // Use streaming copy for large files instead of move
+        // This is more reliable for cross-device scenarios
+        try {
+          const { createReadStream } = await import("fs");
+          const { pipeline } = await import("stream/promises");
+          const readStream = createReadStream(session.tempFilePath);
+          const writeStream = createWriteStream(targetPath);
+
+          await pipeline(readStream, writeStream);
+
+          // Delete temp file after successful copy
+          await unlink(session.tempFilePath).catch(() => {
+            // Ignore if already deleted
+          });
+        } catch (error: any) {
+          console.error("Streaming copy failed, falling back to move:", error);
+          // Fallback to moveFile if copy fails
+          if (error.code !== "ENOENT") {
+            await moveFile(session.tempFilePath, targetPath);
+          }
+        }
+
+        // Clean up temp directory if empty
+        try {
+          const tempDir = dirname(session.tempFilePath);
+          if (existsSync(tempDir)) {
+            const entries = await readdir(tempDir);
+            if (entries.length === 0) {
+              await unlink(tempDir).catch(() => {});
+            }
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      uploadManager.deleteSession(uploadId);
+
+      return {
+        success: true,
+        message: "File uploaded successfully",
+        path: targetPath,
+      };
+    } catch (error) {
+      console.error("Upload complete error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  })
+  .get("/upload/status/:uploadId", async (context) => {
+    try {
+      const uploadId = context.params.uploadId;
+      const status = uploadManager.getSessionStatus(uploadId);
+
+      if (!status) {
+        return {
+          success: false,
+          error: "Upload session not found",
+        };
+      }
+
+      return {
+        success: true,
+        ...status,
+      };
+    } catch (error) {
+      console.error("Upload status error:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",

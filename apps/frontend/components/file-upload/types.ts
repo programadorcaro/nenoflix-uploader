@@ -27,5 +27,8 @@ export interface FileUploadState {
   isUploading: boolean;
   uploadStatus: UploadStatus;
   error: string | null;
+  timeElapsed?: number;
+  timeRemaining?: number | null;
+  uploadSpeed?: number;
 }
 

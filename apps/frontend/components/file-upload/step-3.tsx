@@ -8,6 +8,20 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Progress } from "@/components/ui/progress";
 import type { Step3Data, Step2Data, Step1Data } from "./types";
 
+function formatTime(seconds: number): string {
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  } else if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${minutes}m ${secs}s`;
+  } else {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+  }
+}
+
 interface Step3Props {
   step1Data: Step1Data;
   step2Data: Step2Data;
@@ -16,6 +30,9 @@ interface Step3Props {
   progress: number;
   isUploading: boolean;
   uploadStatus: "idle" | "uploading" | "success" | "error";
+  timeElapsed?: number;
+  timeRemaining?: number | null;
+  uploadSpeed?: number;
   onDataChange: (data: Partial<Step3Data>) => void;
   onBack: () => void;
   onUpload: () => void;
@@ -30,6 +47,9 @@ export function Step3({
   progress,
   isUploading,
   uploadStatus,
+  timeElapsed,
+  timeRemaining,
+  uploadSpeed,
   onDataChange,
   onBack,
   onUpload,
@@ -194,9 +214,26 @@ export function Step3({
           </div>
           <FieldLabel>Progresso do Upload</FieldLabel>
           <Progress value={progress} />
-          <p className="text-sm text-muted-foreground mt-1">
-            {Math.round(progress)}% enviado
-          </p>
+          <div className="mt-2 space-y-1">
+            <p className="text-sm text-muted-foreground">
+              {Math.round(progress)}% enviado
+            </p>
+            {uploadSpeed !== undefined && uploadSpeed > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Velocidade: {(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
+              </p>
+            )}
+            {timeElapsed !== undefined && (
+              <p className="text-xs text-muted-foreground">
+                Tempo decorrido: {formatTime(timeElapsed)}
+              </p>
+            )}
+            {timeRemaining !== null && timeRemaining !== undefined && (
+              <p className="text-xs font-medium text-primary">
+                Tempo restante: {formatTime(timeRemaining)}
+              </p>
+            )}
+          </div>
         </Field>
       )}
 

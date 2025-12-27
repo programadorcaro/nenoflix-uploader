@@ -15,6 +15,8 @@ import { Step2 } from "./step-2";
 import { Step3 } from "./step-3";
 import type { FileUploadState, Step1Data, Step2Data, Step3Data } from "./types";
 import { BACKEND_URL } from "./constants";
+import { UploadChunker } from "@/lib/upload-chunker";
+import { UploadStateManager } from "@/lib/upload-state";
 
 interface FileUploadProps {
   onComplete?: () => void;
@@ -109,6 +111,9 @@ export function FileUpload({
       isUploading: false,
       uploadStatus: "idle",
       error: null,
+      timeElapsed: undefined,
+      timeRemaining: undefined,
+      uploadSpeed: undefined,
     });
     setCurrentStep(1);
   }, []);
@@ -122,7 +127,7 @@ export function FileUpload({
     }
   }, [state.uploadStatus, handleReset]);
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     const { step1, step2, step3 } = state;
     if (!step3.fileName.trim() || !step2.selectedFile) {
       return;
@@ -153,97 +158,114 @@ export function FileUpload({
       uploadStatus: "uploading",
     }));
 
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("folderName", folderName);
-    formData.append("fileName", step3.fileName.trim());
-    formData.append("file", step2.selectedFile);
-    formData.append("destinationPath", getFinalDestinationPath());
+    const file = step2.selectedFile;
+    const fileName = step3.fileName.trim();
+    const destinationPath = getFinalDestinationPath();
 
-    xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        const percentComplete = (e.loaded / e.total) * 100;
-        setState((prev) => ({ ...prev, progress: percentComplete }));
+    let chunker: UploadChunker | null = null;
+
+    try {
+      // Initialize upload session
+      const initResponse = await fetch(`${BACKEND_URL}/upload/init`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fileName,
+          folderName,
+          destinationPath,
+          totalSize: file.size,
+        }),
+      });
+
+      const initResult = await initResponse.json();
+
+      if (!initResult.success) {
+        throw new Error(initResult.error || "Failed to initialize upload");
       }
-    });
 
-    xhr.addEventListener("load", () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          if (response.success) {
-            setState((prev) => ({
-              ...prev,
-              progress: 100,
-              isUploading: false,
-              uploadStatus: "success",
-              step3: {
-                folderName: "",
-                fileName: "",
-                selectedFile: null,
-              },
-            }));
-            if (onComplete) {
-              onComplete();
-            }
-          } else {
-            setState((prev) => ({
-              ...prev,
-              isUploading: false,
-              uploadStatus: "error",
-            }));
-            setError(response.error || "Upload failed");
-          }
-        } catch {
-          setState((prev) => ({
-            ...prev,
-            isUploading: false,
-            uploadStatus: "error",
-          }));
-          setError("Failed to parse server response");
-        }
-      } else {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          setState((prev) => ({
-            ...prev,
-            isUploading: false,
-            uploadStatus: "error",
-          }));
-          setError(response.error || `Upload failed with status ${xhr.status}`);
-        } catch {
-          setState((prev) => ({
-            ...prev,
-            isUploading: false,
-            uploadStatus: "error",
-          }));
-          setError(`Upload failed with status ${xhr.status}`);
-        }
+      const uploadId = initResult.uploadId;
+
+      // Create chunker with optimal chunk size from backend
+      const optimalChunkSize = initResult.chunkSize;
+      chunker = new UploadChunker(file, BACKEND_URL, optimalChunkSize);
+      chunker.setUploadId(uploadId);
+
+      chunker.setProgressCallback((progress) => {
+        setState((prev) => ({
+          ...prev,
+          progress: progress.percentage,
+          timeElapsed: progress.timeElapsed,
+          timeRemaining: progress.timeRemaining,
+          uploadSpeed: progress.uploadSpeed,
+        }));
+      });
+
+      // Save session state
+      const stateManager = new UploadStateManager(uploadId);
+      stateManager.save({
+        uploadId,
+        fileName,
+        folderName,
+        destinationPath,
+        totalSize: file.size,
+        totalChunks: initResult.totalChunks,
+        chunkSize: initResult.chunkSize,
+        timestamp: Date.now(),
+      });
+
+      // Upload all chunks
+      await chunker.uploadAll();
+
+      // Complete upload
+      const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ uploadId }),
+      });
+
+      const completeResult = await completeResponse.json();
+
+      if (!completeResult.success) {
+        throw new Error(completeResult.error || "Failed to complete upload");
       }
-    });
 
-    xhr.addEventListener("error", () => {
+      // Clear session state
+      stateManager.clear();
+
+      setState((prev) => ({
+        ...prev,
+        progress: 100,
+        isUploading: false,
+        uploadStatus: "success",
+        step3: {
+          folderName: "",
+          fileName: "",
+          selectedFile: null,
+        },
+      }));
+
+      if (onComplete) {
+        onComplete();
+      }
+    } catch (error) {
+      if (chunker) {
+        chunker.cancel();
+      }
+
       setState((prev) => ({
         ...prev,
         isUploading: false,
         uploadStatus: "error",
-        progress: 0,
       }));
-      setError("Network error occurred during upload");
-    });
 
-    xhr.addEventListener("abort", () => {
-      setState((prev) => ({
-        ...prev,
-        isUploading: false,
-        uploadStatus: "error",
-        progress: 0,
-      }));
-      setError("Upload was cancelled");
-    });
-
-    xhr.open("POST", `${BACKEND_URL}/upload`);
-    xhr.send(formData);
+      const errorMessage =
+        error instanceof Error ? error.message : "Upload failed";
+      setError(errorMessage);
+    }
   };
 
   return (
@@ -293,6 +315,9 @@ export function FileUpload({
               progress={state.progress}
               isUploading={state.isUploading}
               uploadStatus={state.uploadStatus}
+              timeElapsed={state.timeElapsed}
+              timeRemaining={state.timeRemaining}
+              uploadSpeed={state.uploadSpeed}
               onDataChange={updateStep3Data}
               onBack={handleBackStep}
               onUpload={handleUpload}
