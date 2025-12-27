@@ -3,8 +3,6 @@
 import * as React from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Progress } from "@/components/ui/progress";
 import confetti from "canvas-confetti";
 import type { Step3Data, Step2Data, Step1Data } from "./types";
@@ -34,8 +32,8 @@ interface Step3Props {
   timeElapsed?: number;
   timeRemaining?: number | null;
   uploadSpeed?: number;
+  finalFilePath?: string;
   onDataChange: (data: Partial<Step3Data>) => void;
-  onBack: () => void;
   onUpload: () => void;
   onReset: () => void;
 }
@@ -51,8 +49,8 @@ export function Step3({
   timeElapsed,
   timeRemaining,
   uploadSpeed,
+  finalFilePath,
   onDataChange,
-  onBack,
   onUpload,
   onReset,
 }: Step3Props) {
@@ -70,43 +68,94 @@ export function Step3({
     step1Data.subFolderName,
   ]);
 
-  // Pré-preenche o fileName quando entra no Step 3 para séries/animes
-  React.useEffect(() => {
-    if (
-      (step1Data.contentType === "series" ||
-        step1Data.contentType === "animes") &&
-      folderName &&
-      !step3Data.fileName.trim()
-    ) {
-      onDataChange({ fileName: `${folderName} - S01E01` });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step1Data.contentType, folderName]);
+  // Formata o caminho para exibir apenas a parte relevante
+  const displayPath = React.useMemo(() => {
+    if (!finalFilePath) return "";
 
-  const isFormValid = React.useMemo(() => {
-    const hasFileName = step3Data.fileName.trim() !== "";
-    const hasFile = step2Data.selectedFile !== null;
-
-    if (!hasFileName || !hasFile) {
-      return false;
-    }
-
-    // Para séries e animes, folderName é obrigatório
-    if (
+    // Extrair apenas a parte relevante baseado no tipo de conteúdo
+    if (step1Data.contentType === "movies") {
+      // Para filmes: apenas o nome da pasta base (Movies)
+      const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
+      const moviesIndex = pathParts.findIndex(
+        (part) => part.toLowerCase() === "movies"
+      );
+      if (moviesIndex !== -1) {
+        return `/${pathParts[moviesIndex]}`;
+      }
+      // Se não encontrar "Movies", pega a última pasta antes do arquivo
+      if (pathParts.length >= 2) {
+        return `/${pathParts[pathParts.length - 2]}`;
+      }
+      return finalFilePath;
+    } else if (
       step1Data.contentType === "series" ||
       step1Data.contentType === "animes"
     ) {
-      return folderName.trim() !== "";
+      // Para séries/animes: pasta base + pasta criada
+      const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
+      const contentType =
+        step1Data.contentType === "series" ? "Series" : "Animes";
+      const contentTypeIndex = pathParts.findIndex(
+        (part) =>
+          part === contentType ||
+          part === contentType.toLowerCase() ||
+          part.toLowerCase() === contentType.toLowerCase()
+      );
+
+      if (contentTypeIndex !== -1 && folderName) {
+        // Retorna /Animes/{pasta} ou /Series/{pasta}
+        return `/${pathParts[contentTypeIndex]}/${folderName}`;
+      } else if (contentTypeIndex !== -1) {
+        // Se não houver folderName, apenas a pasta base
+        return `/${pathParts[contentTypeIndex]}`;
+      }
+      // Fallback: pega as duas últimas pastas antes do arquivo
+      if (pathParts.length >= 2) {
+        const lastTwoParts = pathParts.slice(-2);
+        return `/${lastTwoParts[0]}`;
+      }
+      return finalFilePath;
     }
 
-    // Para filmes, apenas fileName e file são necessários
-    return true;
-  }, [
-    step3Data.fileName,
-    step2Data.selectedFile,
-    step1Data.contentType,
-    folderName,
-  ]);
+    return finalFilePath;
+  }, [finalFilePath, step1Data.contentType, folderName]);
+
+  // Copia o fileName do Step 2 para o Step 3 quando entra no Step 3
+  // O nome já vem do Step 2 através do handleNextStep, mas garantimos aqui também
+  React.useEffect(() => {
+    if (step2Data.fileName && !step3Data.fileName.trim()) {
+      // Para séries/animes: adiciona o padrão se houver folderName
+      if (
+        (step1Data.contentType === "series" ||
+          step1Data.contentType === "animes") &&
+        folderName
+      ) {
+        // Se o nome já contém o padrão, não adiciona novamente
+        if (!step2Data.fileName.includes(" - S")) {
+          onDataChange({ fileName: `${folderName} - S01E01` });
+        } else {
+          onDataChange({ fileName: step2Data.fileName });
+        }
+      } else {
+        // Para filmes ou quando não há folderName: usa o nome do Step 2
+        onDataChange({ fileName: step2Data.fileName });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step2Data.fileName, step1Data.contentType, folderName]);
+
+  // Inicia o upload automaticamente quando entra no Step 3
+  React.useEffect(() => {
+    if (
+      uploadStatus === "idle" &&
+      !isUploading &&
+      step2Data.selectedFile &&
+      step3Data.fileName.trim()
+    ) {
+      onUpload();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     if (uploadStatus === "success") {
@@ -147,25 +196,123 @@ export function Step3({
     }
   }, [uploadStatus]);
 
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+  };
+
+  const estimateUploadTime = (
+    fileSizeBytes: number,
+    speedMBps?: number
+  ): string => {
+    const averageSpeedMbps = speedMBps || 10;
+    const speedBytesPerSecond = (averageSpeedMbps * 1024 * 1024) / 8;
+    const seconds = fileSizeBytes / speedBytesPerSecond;
+
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = Math.round(seconds % 60);
+      return `${minutes}m ${remainingSeconds}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${minutes}m`;
+    }
+  };
+
+  // Resumo das informações (deve ser antes dos early returns)
+  const summaryItems = React.useMemo(() => {
+    const items: Array<{ label: string; value: string }> = [];
+
+    if (folderName) {
+      items.push({ label: "Pasta", value: folderName });
+    }
+
+    if (step3Data.fileName) {
+      items.push({ label: "Nome do arquivo", value: step3Data.fileName });
+    }
+
+    if (step2Data.selectedFile) {
+      items.push({
+        label: "Tamanho",
+        value: formatFileSize(step2Data.selectedFile.size),
+      });
+
+      const estimatedTime = estimateUploadTime(
+        step2Data.selectedFile.size,
+        uploadSpeed ? uploadSpeed / 1024 / 1024 : undefined
+      );
+      items.push({ label: "Tempo estimado", value: estimatedTime });
+    }
+
+    return items;
+  }, [folderName, step3Data.fileName, step2Data.selectedFile, uploadSpeed]);
+
   if (uploadStatus === "success") {
     return (
       <div className="space-y-6 relative">
-        <div className="text-center py-8">
-          <div className="mx-auto mb-4 aspect-square w-full">
-            <Image
-              src="/sucess.jpg"
-              alt="Sucesso"
-              width={400}
-              height={300}
-              className="w-full h-full object-cover rounded-lg"
-            />
+        <div className="text-center py-8 sm:py-12">
+          <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
+            <div className="relative w-full max-w-32 aspect-square mx-auto">
+              <Image
+                src="/sucess.jpg"
+                alt="Erro"
+                width={400}
+                height={300}
+                className="w-full h-auto object-cover rounded-2xl shadow-2xl"
+                priority
+              />
+              <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
+            </div>
           </div>
-          <h3 className="text-lg font-semibold mb-2">
-            Upload concluído com sucesso!
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            O arquivo foi enviado com sucesso.
-          </p>
+          <div className="space-y-6 max-w-2xl mx-auto">
+            <div className="space-y-3">
+              <h3 className="text-2xl sm:text-3xl font-bold text-primary">
+                Upload concluído com sucesso!
+              </h3>
+              <p className="text-sm sm:text-base text-muted-foreground">
+                O arquivo foi enviado com sucesso para o servidor.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-4 text-left">
+              {step3Data.fileName && (
+                <div className="space-y-1">
+                  <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+                    Nome do arquivo
+                  </p>
+                  <p className="text-sm sm:text-base font-semibold text-foreground break-all">
+                    {step3Data.fileName}
+                  </p>
+                </div>
+              )}
+
+              {displayPath && (
+                <div className="space-y-1">
+                  <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+                    Localização
+                  </p>
+                  <p className="text-sm sm:text-base font-mono text-foreground break-all bg-muted/50 p-2 rounded-md">
+                    {displayPath}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Button
+              onClick={onReset}
+              type="button"
+              className="w-full sm:w-auto sm:min-w-[200px]"
+              size="lg"
+            >
+              Concluir
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -174,144 +321,143 @@ export function Step3({
   if (uploadStatus === "error") {
     return (
       <div className="space-y-6">
-        <div className="text-center py-8">
-          <div className="mx-auto mb-4 aspect-square w-full">
-            <Image
-              src="/error.jpg"
-              alt="Erro"
-              width={400}
-              height={300}
-              className="w-full h-full object-cover rounded-lg"
-            />
+        <div className="text-center py-8 sm:py-12">
+          <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
+            <div className="relative w-full max-w-32 aspect-square mx-auto">
+              <Image
+                src="/error.jpg"
+                alt="Erro no upload"
+                width={400}
+                height={300}
+                className="w-full h-auto object-cover rounded-2xl shadow-2xl"
+                priority
+              />
+              <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
+            </div>
           </div>
-          <h3 className="text-lg font-semibold mb-2">Erro no upload</h3>
-          <p className="text-sm text-destructive mb-4">
-            {error || "Ocorreu um erro ao enviar o arquivo."}
-          </p>
-          <Button onClick={onReset} type="button" className="w-full">
-            Voltar ao Início
-          </Button>
+          <div className="space-y-4 max-w-md mx-auto">
+            <h3 className="text-2xl sm:text-3xl font-bold text-destructive">
+              Erro no upload
+            </h3>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+              <p className="text-sm sm:text-base text-destructive font-medium">
+                {error || "Ocorreu um erro ao enviar o arquivo."}
+              </p>
+            </div>
+            <Button
+              onClick={onReset}
+              type="button"
+              className="w-full sm:w-auto sm:min-w-[200px]"
+              size="lg"
+            >
+              Voltar ao Início
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {step2Data.selectedFile && (
-        <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex-shrink-0 w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
-              <span className="text-xs font-semibold text-primary">
-                {step2Data.selectedFile.name
-                  .substring(step2Data.selectedFile.name.lastIndexOf(".") + 1)
-                  .toUpperCase()}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">
-                {step2Data.selectedFile.name}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {(step2Data.selectedFile.size / 1024 / 1024).toFixed(2)} MB
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {folderName && (
-        <div className="rounded-lg border border-border bg-muted/50 p-3">
-          <p className="text-xs text-muted-foreground mb-1">
-            Pasta selecionada:
-          </p>
-          <p className="text-sm font-medium">{folderName}</p>
-        </div>
-      )}
-
-      <Field>
-        <FieldLabel htmlFor="file-name">File Name</FieldLabel>
-        <Input
-          id="file-name"
-          placeholder="Enter file name"
-          value={step3Data.fileName}
-          onChange={(e) => onDataChange({ fileName: e.target.value })}
-          disabled={isUploading}
-          required
-        />
-      </Field>
-
-      {(isUploading || uploadStatus === "completing") && (
-        <Field>
-          <div className="mb-4 aspect-square w-full">
-            <Image
-              src="/loading.jpg"
-              alt="Carregando"
-              width={400}
-              height={300}
-              className="w-full h-full object-cover rounded-lg"
-            />
-          </div>
-          <FieldLabel>
-            {uploadStatus === "completing" ? "Finalizando..." : "Progresso do Upload"}
-          </FieldLabel>
-          <Progress value={uploadStatus === "completing" ? 100 : progress} />
-          <div className="mt-2 space-y-1">
-            {uploadStatus === "completing" ? (
-              <p className="text-sm text-muted-foreground">
-                Enviando arquivo...
-              </p>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground">
-                  {Math.round(progress)}% enviado
+    <div className="space-y-6 sm:space-y-8">
+      {/* Resumo */}
+      {summaryItems.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm">
+          <h3 className="text-lg sm:text-xl font-semibold mb-4">
+            Resumo do Upload
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {summaryItems.map((item, index) => (
+              <div key={index} className="space-y-1">
+                <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+                  {item.label}
                 </p>
-                {uploadSpeed !== undefined && uploadSpeed > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Velocidade: {(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
-                  </p>
-                )}
-                {timeElapsed !== undefined && (
-                  <p className="text-xs text-muted-foreground">
-                    Tempo decorrido: {formatTime(timeElapsed)}
-                  </p>
-                )}
-                {timeRemaining !== null && timeRemaining !== undefined && (
-                  <p className="text-xs font-medium text-primary">
-                    Tempo restante: {formatTime(timeRemaining)}
-                  </p>
-                )}
-              </>
-            )}
+                <p className="text-sm sm:text-base font-semibold text-foreground">
+                  {item.value}
+                </p>
+              </div>
+            ))}
           </div>
-        </Field>
+        </div>
+      )}
+
+      {/* Progresso do Upload */}
+      {(isUploading || uploadStatus === "completing") && (
+        <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-6 sm:p-8">
+          <div className="flex flex-col sm:flex-row items-center gap-6">
+            <div className="shrink-0 max-w-32 sm:max-w-40">
+              <div className="relative w-full max-w-32 aspect-square mx-auto">
+                <Image
+                  src="/loading.jpg"
+                  alt="Carregando"
+                  width={400}
+                  height={300}
+                  className="w-full h-auto object-cover rounded-2xl shadow-2xl"
+                  priority
+                />
+                <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
+              </div>
+            </div>
+            <div className="flex-1 w-full space-y-4">
+              <div>
+                <h3 className="text-lg sm:text-xl font-semibold mb-2">
+                  {uploadStatus === "completing"
+                    ? "Finalizando upload..."
+                    : "Enviando arquivo"}
+                </h3>
+                <Progress
+                  value={uploadStatus === "completing" ? 100 : progress}
+                  className="h-3 mb-3"
+                />
+                <p className="text-sm text-muted-foreground">
+                  {Math.round(progress)}% concluído
+                </p>
+              </div>
+
+              {uploadStatus !== "completing" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  {uploadSpeed !== undefined && uploadSpeed > 0 && (
+                    <div className="bg-background/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">
+                        Velocidade
+                      </p>
+                      <p className="text-base font-semibold text-foreground">
+                        {(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
+                      </p>
+                    </div>
+                  )}
+                  {timeElapsed !== undefined && (
+                    <div className="bg-background/50 rounded-lg p-3">
+                      <p className="text-xs text-muted-foreground mb-1">
+                        Tempo decorrido
+                      </p>
+                      <p className="text-base font-semibold text-foreground">
+                        {formatTime(timeElapsed)}
+                      </p>
+                    </div>
+                  )}
+                  {timeRemaining !== null && timeRemaining !== undefined && (
+                    <div className="bg-primary/10 rounded-lg p-3 sm:col-span-2">
+                      <p className="text-xs text-primary mb-1">
+                        Tempo restante
+                      </p>
+                      <p className="text-base font-semibold text-primary">
+                        {formatTime(timeRemaining)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {error && uploadStatus === "idle" && (
-        <div className="text-sm text-destructive bg-destructive/10 p-2 rounded-md">
+        <div className="text-sm text-destructive bg-destructive/10 p-4 rounded-lg border border-destructive/20">
           {error}
         </div>
       )}
-
-      <Field orientation="horizontal" className="gap-2">
-        <Button
-          onClick={onBack}
-          disabled={isUploading}
-          type="button"
-          variant="outline"
-          className="flex-1"
-        >
-          Voltar
-        </Button>
-        <Button
-          onClick={onUpload}
-          disabled={!isFormValid || isUploading}
-          type="button"
-          className="flex-1"
-        >
-          {isUploading ? "Enviando..." : "Enviar"}
-        </Button>
-      </Field>
     </div>
   );
 }

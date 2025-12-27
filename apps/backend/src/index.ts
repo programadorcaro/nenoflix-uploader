@@ -12,9 +12,9 @@ import { writeChunk, validateFileIntegrity } from "./chunk-handler.js";
 
 const PORT = 8098;
 const DEFAULT_TMP_DIR = "tmp";
-const MIN_CHUNK_SIZE = 20 * 1024 * 1024; // 20MB minimum
-const MAX_CHUNK_SIZE = 100 * 1024 * 1024; // 100MB maximum
-const TARGET_CHUNKS = 200; // Target number of chunks for optimal performance
+const MIN_CHUNK_SIZE = 50 * 1024 * 1024; // 50MB minimum (reduz overhead de requisições)
+const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
+const TARGET_CHUNKS = 100; // Target number of chunks (menos chunks = menos overhead)
 
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
 

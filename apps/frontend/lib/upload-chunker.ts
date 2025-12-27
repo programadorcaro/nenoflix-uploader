@@ -1,20 +1,20 @@
-const MIN_CHUNK_SIZE = 20 * 1024 * 1024; // 20MB minimum
-const MAX_CHUNK_SIZE = 100 * 1024 * 1024; // 100MB maximum
-const TARGET_CHUNKS = 200; // Target number of chunks
-const MAX_PARALLEL_CHUNKS = 4;
+const MIN_CHUNK_SIZE = 50 * 1024 * 1024; // 50MB minimum (reduz overhead de requisições)
+const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
+const TARGET_CHUNKS = 100; // Target number of chunks (menos chunks = menos overhead)
+const MAX_PARALLEL_CHUNKS = 8; // Mais uploads simultâneos para melhor velocidade
 const MAX_RETRIES = 3;
 
 function calculateOptimalChunkSize(totalSize: number): number {
   const idealChunkSize = Math.floor(totalSize / TARGET_CHUNKS);
-  
+
   if (idealChunkSize < MIN_CHUNK_SIZE) {
     return MIN_CHUNK_SIZE;
   }
-  
+
   if (idealChunkSize > MAX_CHUNK_SIZE) {
     return MAX_CHUNK_SIZE;
   }
-  
+
   // Round to nearest MB for cleaner numbers
   return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
 }
@@ -56,12 +56,10 @@ export class UploadChunker {
   private startTime: number = 0;
   private lastProgressTime: number = 0;
   private lastProgressBytes: number = 0;
+  private progressInterval?: NodeJS.Timeout;
+  private activeUploadBytes: Map<number, number>; // Track bytes uploaded for active chunks
 
-  constructor(
-    file: File,
-    backendUrl: string,
-    chunkSize?: number
-  ) {
+  constructor(file: File, backendUrl: string, chunkSize?: number) {
     this.file = file;
     this.backendUrl = backendUrl;
     this.chunkSize = chunkSize || calculateOptimalChunkSize(file.size);
@@ -76,6 +74,7 @@ export class UploadChunker {
         retries: 0,
       });
     });
+    this.activeUploadBytes = new Map();
   }
 
   setProgressCallback(callback: (progress: UploadProgress) => void): void {
@@ -115,11 +114,11 @@ export class UploadChunker {
     return this.file.slice(chunk.start, chunk.end);
   }
 
-  private updateProgress(): void {
+  private updateProgress(includeActiveUploads: boolean = false): void {
     if (!this.onProgress) return;
 
     const now = Date.now();
-    
+
     if (this.startTime === 0) {
       this.startTime = now;
       this.lastProgressTime = now;
@@ -129,12 +128,23 @@ export class UploadChunker {
     let uploadedBytes = 0;
     let chunksCompleted = 0;
 
+    // Count completed chunks
     for (const status of this.chunkStatuses.values()) {
       if (status.status === "completed") {
         const chunk = this.chunks[status.index];
         if (chunk) {
           uploadedBytes += chunk.size;
           chunksCompleted++;
+        }
+      } else if (includeActiveUploads && status.status === "uploading") {
+        // Estimate progress for currently uploading chunks
+        const activeBytes = this.activeUploadBytes.get(status.index) || 0;
+        const chunk = this.chunks[status.index];
+        if (chunk) {
+          // Use a conservative estimate: assume 50% of chunk is uploaded if we don't have exact data
+          const estimatedBytes =
+            activeBytes > 0 ? activeBytes : chunk.size * 0.5;
+          uploadedBytes += Math.min(estimatedBytes, chunk.size);
         }
       }
     }
@@ -148,10 +158,12 @@ export class UploadChunker {
     let uploadSpeed = 0;
     if (timeSinceLastUpdate > 0 && bytesSinceLastUpdate > 0) {
       const currentSpeed = bytesSinceLastUpdate / timeSinceLastUpdate;
-      const previousSpeed = this.lastProgressBytes > 0 
-        ? this.lastProgressBytes / ((this.lastProgressTime - this.startTime) / 1000)
-        : currentSpeed;
-      
+      const previousSpeed =
+        this.lastProgressBytes > 0
+          ? this.lastProgressBytes /
+            ((this.lastProgressTime - this.startTime) / 1000)
+          : currentSpeed;
+
       // Exponential moving average with alpha = 0.3
       uploadSpeed = previousSpeed * 0.7 + currentSpeed * 0.3;
     } else if (timeElapsed > 0) {
@@ -260,68 +272,89 @@ export class UploadChunker {
       throw new Error("Upload ID not set. Call initUpload first.");
     }
 
-    while (true) {
-      const pending = this.getPendingChunks();
-      if (pending.length === 0) {
-        break;
+    // Start periodic progress updates for smoother feedback
+    this.startProgressInterval();
+
+    try {
+      while (true) {
+        const pending = this.getPendingChunks();
+        if (pending.length === 0) {
+          break;
+        }
+
+        const active = this.getActiveUploads();
+        const slotsAvailable = MAX_PARALLEL_CHUNKS - active;
+
+        if (slotsAvailable <= 0) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          continue;
+        }
+
+        const chunksToUpload = pending.slice(0, slotsAvailable);
+        const uploadPromises = chunksToUpload.map(async (chunkIndex) => {
+          const chunk = this.chunks[chunkIndex];
+          if (!chunk) return false;
+          const status = this.chunkStatuses.get(chunkIndex)!;
+
+          if (status.retries >= MAX_RETRIES) {
+            throw new Error(
+              `Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries`
+            );
+          }
+
+          const success = await this.uploadChunk(chunk);
+          if (!success && status.status === "failed") {
+            status.retries++;
+            status.status = "pending";
+            status.error = undefined;
+          }
+
+          return success;
+        });
+
+        await Promise.allSettled(uploadPromises);
       }
 
-      const active = this.getActiveUploads();
-      const slotsAvailable = MAX_PARALLEL_CHUNKS - active;
+      const allCompleted = Array.from(this.chunkStatuses.values()).every(
+        (s) => s.status === "completed"
+      );
 
-      if (slotsAvailable <= 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        continue;
+      if (!allCompleted) {
+        throw new Error("Some chunks failed to upload");
       }
-
-      const chunksToUpload = pending.slice(0, slotsAvailable);
-      const uploadPromises = chunksToUpload.map(async (chunkIndex) => {
-        const chunk = this.chunks[chunkIndex];
-        const status = this.chunkStatuses.get(chunkIndex)!;
-
-        if (!chunk) {
-          throw new Error(`Chunk ${chunkIndex} not found`);
-        }
-
-        if (status.retries >= MAX_RETRIES) {
-          throw new Error(
-            `Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries`
-          );
-        }
-
-        const success = await this.uploadChunk(chunk);
-        if (!success && status.status === "failed") {
-          status.retries++;
-          status.status = "pending";
-          status.error = undefined;
-        }
-
-        return success;
-      });
-
-      await Promise.allSettled(uploadPromises);
+    } finally {
+      // Stop periodic progress updates
+      this.stopProgressInterval();
     }
+  }
 
-    const allCompleted = Array.from(this.chunkStatuses.values()).every(
-      (s) => s.status === "completed"
-    );
+  private startProgressInterval(): void {
+    // Update progress every 200ms for smooth feedback, even during chunk uploads
+    this.progressInterval = setInterval(() => {
+      this.updateProgress(true); // Include active uploads in progress calculation
+    }, 200);
+  }
 
-    if (!allCompleted) {
-      throw new Error("Some chunks failed to upload");
+  private stopProgressInterval(): void {
+    if (this.progressInterval) {
+      clearInterval(this.progressInterval);
+      this.progressInterval = undefined;
     }
   }
 
   cancel(): void {
+    this.stopProgressInterval();
     for (const controller of this.abortControllers.values()) {
       controller.abort();
     }
     this.abortControllers.clear();
+    this.activeUploadBytes.clear();
   }
 
   getProgress(): UploadProgress {
     const now = Date.now();
     const timeElapsed = this.startTime > 0 ? (now - this.startTime) / 1000 : 0;
-    
+
     let uploadedBytes = 0;
     let chunksCompleted = 0;
 
@@ -358,4 +391,3 @@ export class UploadChunker {
     };
   }
 }
-

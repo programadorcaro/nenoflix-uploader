@@ -5,10 +5,12 @@ export interface Step1Data {
   baseDestinationPath: string;
   subFolderName: string;
   selectedExistingFolder: string;
+  useMultipleUpload?: boolean; // Para séries/animes: usar upload múltiplo
 }
 
 export interface Step2Data {
   selectedFile: File | null;
+  fileName: string;
 }
 
 export interface Step3Data {
@@ -30,5 +32,6 @@ export interface FileUploadState {
   timeElapsed?: number;
   timeRemaining?: number | null;
   uploadSpeed?: number;
+  finalFilePath?: string;
 }
 

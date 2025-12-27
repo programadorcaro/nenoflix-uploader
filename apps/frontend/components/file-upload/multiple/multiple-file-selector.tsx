@@ -5,22 +5,23 @@ import { cn } from "@/lib/utils";
 import { ALLOWED_EXTENSIONS } from "../constants";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CloudUploadIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import type { MultipleFileItem } from "./types";
 
-interface FileDropZoneProps {
-  file: File | null;
-  onFileSelect: (file: File | null) => void;
-  onFileRemove: () => void;
+interface MultipleFileSelectorProps {
+  files: MultipleFileItem[];
+  onFilesSelect: (files: File[]) => void;
+  onFileRemove: (id: string) => void;
   disabled?: boolean;
   accept?: string;
 }
 
-export function FileDropZone({
-  file,
-  onFileSelect,
+export function MultipleFileSelector({
+  files,
+  onFilesSelect,
   onFileRemove,
   disabled = false,
   accept = ".mkv,.mp4,.srt",
-}: FileDropZoneProps) {
+}: MultipleFileSelectorProps) {
   const [isDragging, setIsDragging] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -34,11 +35,20 @@ export function FileDropZone({
     return ALLOWED_EXTENSIONS.includes(extension);
   };
 
-  const handleFile = (file: File) => {
-    if (!validateFile(file)) {
-      return;
+  const handleFiles = (fileList: FileList | null) => {
+    if (!fileList) return;
+
+    const validFiles: File[] = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      if (validateFile(file)) {
+        validFiles.push(file);
+      }
     }
-    onFileSelect(file);
+
+    if (validFiles.length > 0) {
+      onFilesSelect(validFiles);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -62,16 +72,14 @@ export function FileDropZone({
 
     if (disabled) return;
 
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) {
-      handleFile(droppedFile);
-    }
+    handleFiles(e.dataTransfer.files);
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      handleFile(selectedFile);
+    handleFiles(e.target.files);
+    // Reset input to allow selecting same files again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
@@ -89,93 +97,70 @@ export function FileDropZone({
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
   };
 
-  const getFileExtension = (fileName: string): string => {
-    const lastDotIndex = fileName.lastIndexOf(".");
-    if (lastDotIndex === -1) return "";
-    return fileName.substring(lastDotIndex + 1).toUpperCase();
-  };
-
-  const estimateUploadTime = (fileSizeBytes: number): string => {
-    const averageSpeedMbps = 10;
-    const speedBytesPerSecond = (averageSpeedMbps * 1024 * 1024) / 8;
-    const seconds = fileSizeBytes / speedBytesPerSecond;
-
-    if (seconds < 60) {
-      return `${Math.round(seconds)}s`;
-    } else if (seconds < 3600) {
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = Math.round(seconds % 60);
-      return `${minutes}m ${remainingSeconds}s`;
-    } else {
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      return `${hours}h ${minutes}m`;
-    }
-  };
-
-  if (file) {
+  if (files.length > 0) {
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-2">
+        <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-semibold text-foreground">
+              {files.length} arquivo{files.length !== 1 ? "s" : ""} selecionado{files.length !== 1 ? "s" : ""}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                if (fileInputRef.current) {
+                  fileInputRef.current.click();
+                }
+              }}
+              disabled={disabled}
+              className="text-sm text-primary hover:text-primary/80 font-medium disabled:opacity-50"
+            >
+              Adicionar mais
+            </button>
+          </div>
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {files.map((fileItem) => (
+              <div
+                key={fileItem.id}
+                className="flex items-center gap-3 p-3 rounded-lg border border-border bg-background"
+              >
                 <div className="shrink-0 w-10 h-10 rounded-md bg-primary/10 flex items-center justify-center">
                   <span className="text-xs font-semibold text-primary">
-                    {getFileExtension(file.name)}
+                    {fileItem.originalFileName
+                      .substring(fileItem.originalFileName.lastIndexOf(".") + 1)
+                      .toUpperCase()}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{file.name}</p>
+                  <p className="text-sm font-medium truncate">
+                    {fileItem.originalFileName}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatFileSize(file.size)}
+                    {formatFileSize(fileItem.file.size)}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => onFileRemove(fileItem.id)}
+                  disabled={disabled}
+                  className="shrink-0 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+                  aria-label="Remover arquivo"
+                >
+                  <HugeiconsIcon
+                    icon={Cancel01Icon}
+                    className="h-5 w-5"
+                    strokeWidth={2}
+                  />
+                </button>
               </div>
-              <div className="grid grid-cols-2 gap-4 mt-3 text-xs">
-                <div>
-                  <span className="text-muted-foreground">Extensão:</span>
-                  <span className="ml-2 font-medium">
-                    {getFileExtension(file.name)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Tamanho:</span>
-                  <span className="ml-2 font-medium">
-                    {formatFileSize(file.size)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Tipo:</span>
-                  <span className="ml-2 font-medium">{file.type || "N/A"}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Tempo estimado:</span>
-                  <span className="ml-2 font-medium">
-                    {estimateUploadTime(file.size)}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onFileRemove}
-              disabled={disabled}
-              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
-              aria-label="Remover arquivo"
-            >
-              <HugeiconsIcon
-                icon={Cancel01Icon}
-                className="h-5 w-5"
-                strokeWidth={2}
-              />
-            </button>
+            ))}
           </div>
         </div>
         <input
           ref={fileInputRef}
           type="file"
           accept={accept}
+          multiple
           onChange={handleFileInputChange}
           disabled={disabled}
           className="hidden"
@@ -202,6 +187,7 @@ export function FileDropZone({
         ref={fileInputRef}
         type="file"
         accept={accept}
+        multiple
         onChange={handleFileInputChange}
         disabled={disabled}
         className="hidden"
@@ -215,9 +201,11 @@ export function FileDropZone({
           />
         </div>
         <div>
-          <p className="text-base sm:text-lg font-semibold">Arraste e solte o arquivo aqui</p>
+          <p className="text-base sm:text-lg font-semibold">
+            Arraste e solte os arquivos aqui
+          </p>
           <p className="text-sm text-muted-foreground mt-2">
-            ou clique para selecionar
+            ou clique para selecionar múltiplos arquivos
           </p>
         </div>
         <p className="text-xs sm:text-sm text-muted-foreground">
@@ -227,3 +215,4 @@ export function FileDropZone({
     </div>
   );
 }
+
