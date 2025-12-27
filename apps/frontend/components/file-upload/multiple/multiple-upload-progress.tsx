@@ -10,7 +10,6 @@ interface MultipleUploadProgressProps {
   files: MultipleFileItem[];
   currentUploadIndex: number;
   contentType: "series" | "animes";
-  folderName: string;
   onReset: () => void;
 }
 
@@ -69,7 +68,6 @@ export function MultipleUploadProgress({
   files,
   currentUploadIndex,
   contentType,
-  folderName,
   onReset,
 }: MultipleUploadProgressProps) {
   const completedCount = files.filter((f) => f.status === "completed").length;
@@ -78,7 +76,8 @@ export function MultipleUploadProgress({
     (f) => f.status === "completed" || f.status === "error"
   );
   const currentFile = files[currentUploadIndex];
-  const isUploading = currentFile?.status === "uploading";
+  const isUploading =
+    currentFile?.status === "uploading" || currentFile?.status === "completing";
 
   if (allCompleted) {
     const allSuccess = errorCount === 0;
@@ -121,7 +120,7 @@ export function MultipleUploadProgress({
                 Resumo dos arquivos
               </h4>
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {files.map((fileItem, index) => (
+                {files.map((fileItem) => (
                   <div
                     key={fileItem.id}
                     className={`p-3 rounded-lg border ${
@@ -140,7 +139,10 @@ export function MultipleUploadProgress({
                         </p>
                         {fileItem.finalFilePath && (
                           <p className="text-xs font-mono text-muted-foreground mt-1 break-all">
-                            {formatFilePath(fileItem.finalFilePath, contentType)}
+                            {formatFilePath(
+                              fileItem.finalFilePath,
+                              contentType
+                            )}
                           </p>
                         )}
                       </div>
@@ -219,48 +221,62 @@ export function MultipleUploadProgress({
             <div className="flex-1 w-full space-y-4">
               <div>
                 <h3 className="text-lg sm:text-xl font-semibold mb-2">
-                  Enviando: {currentFile.fileName}
+                  {currentFile.status === "completing"
+                    ? "Finalizando upload..."
+                    : `Enviando: ${currentFile.fileName}`}
                 </h3>
-                <Progress value={currentFile.progress} className="h-3 mb-3" />
+                <Progress
+                  value={
+                    currentFile.status === "completing"
+                      ? 100
+                      : currentFile.progress
+                  }
+                  className="h-3 mb-3"
+                />
                 <p className="text-sm text-muted-foreground">
-                  {Math.round(currentFile.progress)}% concluído
+                  {currentFile.status === "completing"
+                    ? "100% concluído"
+                    : `${Math.round(currentFile.progress)}% concluído`}
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                {currentFile.uploadSpeed !== undefined &&
-                  currentFile.uploadSpeed > 0 && (
+              {currentFile.status !== "completing" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  {currentFile.uploadSpeed !== undefined &&
+                    currentFile.uploadSpeed > 0 && (
+                      <div className="bg-background/50 rounded-lg p-3">
+                        <p className="text-xs text-muted-foreground mb-1">
+                          Velocidade
+                        </p>
+                        <p className="text-base font-semibold text-foreground">
+                          {(currentFile.uploadSpeed / 1024 / 1024).toFixed(2)}{" "}
+                          MB/s
+                        </p>
+                      </div>
+                    )}
+                  {currentFile.timeElapsed !== undefined && (
                     <div className="bg-background/50 rounded-lg p-3">
                       <p className="text-xs text-muted-foreground mb-1">
-                        Velocidade
+                        Tempo decorrido
                       </p>
                       <p className="text-base font-semibold text-foreground">
-                        {(currentFile.uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
+                        {formatTime(currentFile.timeElapsed)}
                       </p>
                     </div>
                   )}
-                {currentFile.timeElapsed !== undefined && (
-                  <div className="bg-background/50 rounded-lg p-3">
-                    <p className="text-xs text-muted-foreground mb-1">
-                      Tempo decorrido
-                    </p>
-                    <p className="text-base font-semibold text-foreground">
-                      {formatTime(currentFile.timeElapsed)}
-                    </p>
-                  </div>
-                )}
-                {currentFile.timeRemaining !== null &&
-                  currentFile.timeRemaining !== undefined && (
-                    <div className="bg-primary/10 rounded-lg p-3 sm:col-span-2">
-                      <p className="text-xs text-primary mb-1">
-                        Tempo restante
-                      </p>
-                      <p className="text-base font-semibold text-primary">
-                        {formatTime(currentFile.timeRemaining)}
-                      </p>
-                    </div>
-                  )}
-              </div>
+                  {currentFile.timeRemaining !== null &&
+                    currentFile.timeRemaining !== undefined && (
+                      <div className="bg-primary/10 rounded-lg p-3 sm:col-span-2">
+                        <p className="text-xs text-primary mb-1">
+                          Tempo restante
+                        </p>
+                        <p className="text-base font-semibold text-primary">
+                          {formatTime(currentFile.timeRemaining)}
+                        </p>
+                      </div>
+                    )}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -283,10 +299,10 @@ export function MultipleUploadProgress({
                   isCurrent
                     ? "border-primary bg-primary/5"
                     : isCompleted
-                    ? "border-primary/20 bg-primary/5"
-                    : isError
-                    ? "border-destructive/20 bg-destructive/5"
-                    : "border-border bg-muted/30"
+                      ? "border-primary/20 bg-primary/5"
+                      : isError
+                        ? "border-destructive/20 bg-destructive/5"
+                        : "border-border bg-muted/30"
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -347,4 +363,3 @@ export function MultipleUploadProgress({
     </div>
   );
 }
-

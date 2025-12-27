@@ -101,27 +101,33 @@ export function MultipleUpload({
     if (!canStartUpload) return;
 
     setCurrentStep("upload");
-    setState((prev) => ({
-      ...prev,
-      isUploading: true,
-      currentUploadIndex: 0,
-      error: null,
-    }));
+    
+    // Captura a lista de arquivos atual antes de iniciar
+    let filesToUpload: MultipleFileItem[] = [];
+    
+    setState((prev) => {
+      filesToUpload = prev.files;
+      return {
+        ...prev,
+        isUploading: true,
+        currentUploadIndex: 0,
+        error: null,
+      };
+    });
 
-    // Upload em fila (um por vez)
-    for (let i = 0; i < state.files.length; i++) {
-      const fileItem = state.files[i];
-      
+    // Upload em fila (um por vez) - usando a lista capturada
+    for (let i = 0; i < filesToUpload.length; i++) {
+      const fileItem = filesToUpload[i];
+      const fileId = fileItem.id;
+
+      // Atualiza índice atual e status para uploading
       setState((prev) => ({
         ...prev,
         currentUploadIndex: i,
-      }));
-
-      // Atualiza status para uploading
-      setState((prev) => ({
-        ...prev,
-        files: prev.files.map((f, idx) =>
-          idx === i ? { ...f, status: "uploading" as const, progress: 0 } : f
+        files: prev.files.map((f) =>
+          f.id === fileId
+            ? { ...f, status: "uploading" as const, progress: 0 }
+            : f
         ),
       }));
 
@@ -156,12 +162,12 @@ export function MultipleUpload({
         chunker = new UploadChunker(fileItem.file, BACKEND_URL, optimalChunkSize);
         chunker.setUploadId(uploadId);
 
-        // Progress callback
+        // Progress callback - igual ao upload único
         chunker.setProgressCallback((progress) => {
           setState((prev) => ({
             ...prev,
-            files: prev.files.map((f, idx) =>
-              idx === i
+            files: prev.files.map((f) =>
+              f.id === fileId
                 ? {
                     ...f,
                     progress: progress.percentage,
@@ -189,6 +195,14 @@ export function MultipleUpload({
 
         // Upload all chunks
         await chunker.uploadAll();
+
+        // Update UI to show "completing..." during completion
+        setState((prev) => ({
+          ...prev,
+          files: prev.files.map((f) =>
+            f.id === fileId ? { ...f, status: "completing" as const } : f
+          ),
+        }));
 
         // Complete upload
         const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {
@@ -218,8 +232,8 @@ export function MultipleUpload({
         // Marca como concluído
         setState((prev) => ({
           ...prev,
-          files: prev.files.map((f, idx) =>
-            idx === i
+          files: prev.files.map((f) =>
+            f.id === fileId
               ? {
                   ...f,
                   status: "completed" as const,
@@ -241,8 +255,8 @@ export function MultipleUpload({
         // Marca como erro
         setState((prev) => ({
           ...prev,
-          files: prev.files.map((f, idx) =>
-            idx === i
+          files: prev.files.map((f) =>
+            f.id === fileId
               ? {
                   ...f,
                   status: "error" as const,
@@ -368,7 +382,6 @@ export function MultipleUpload({
           files={state.files}
           currentUploadIndex={state.currentUploadIndex}
           contentType={contentType}
-          folderName={folderName}
           onReset={handleReset}
         />
       )}

@@ -41,7 +41,7 @@ export function MultipleFileSelector({
     const validFiles: File[] = [];
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
-      if (validateFile(file)) {
+      if (file && validateFile(file)) {
         validFiles.push(file);
       }
     }
@@ -103,7 +103,8 @@ export function MultipleFileSelector({
         <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4">
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm font-semibold text-foreground">
-              {files.length} arquivo{files.length !== 1 ? "s" : ""} selecionado{files.length !== 1 ? "s" : ""}
+              {files.length} arquivo{files.length !== 1 ? "s" : ""} selecionado
+              {files.length !== 1 ? "s" : ""}
             </p>
             <button
               type="button"
@@ -215,4 +216,3 @@ export function MultipleFileSelector({
     </div>
   );
 }
-

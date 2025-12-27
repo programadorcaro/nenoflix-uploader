@@ -3,7 +3,7 @@ export interface MultipleFileItem {
   file: File;
   fileName: string; // Nome sugerido/editável
   originalFileName: string; // Nome original (somente leitura)
-  status: "pending" | "uploading" | "completed" | "error";
+  status: "pending" | "uploading" | "completing" | "completed" | "error";
   progress: number;
   error?: string;
   uploadId?: string;
@@ -20,4 +20,3 @@ export interface MultipleUploadState {
   allCompleted: boolean;
   error: string | null;
 }
-
