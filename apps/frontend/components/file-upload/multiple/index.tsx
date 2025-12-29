@@ -35,12 +35,19 @@ export function MultipleUpload({
 
   const [currentStep, setCurrentStep] = React.useState<"select" | "names" | "upload">("select");
 
+  // Extrai nome do arquivo sem extensão
+  const extractFileName = (file: File): string => {
+    const lastDotIndex = file.name.lastIndexOf(".");
+    if (lastDotIndex === -1) return file.name;
+    return file.name.substring(0, lastDotIndex);
+  };
+
   // Adiciona arquivos à lista
   const handleFilesSelect = (newFiles: File[]) => {
     const newFileItems: MultipleFileItem[] = newFiles.map((file) => ({
       id: `${Date.now()}-${Math.random()}`,
       file,
-      fileName: "",
+      fileName: extractFileName(file),
       originalFileName: file.name,
       status: "pending",
       progress: 0,

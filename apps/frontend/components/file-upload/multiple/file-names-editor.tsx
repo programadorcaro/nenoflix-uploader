@@ -18,39 +18,23 @@ export function FileNamesEditor({
   folderName,
   disabled = false,
 }: FileNamesEditorProps) {
-  const extractFileName = (file: File): string => {
-    const lastDotIndex = file.name.lastIndexOf(".");
-    if (lastDotIndex === -1) return file.name;
-    return file.name.substring(0, lastDotIndex);
-  };
-
-  // Gera nome sugerido baseado no padrão: {folderName} - S01E{numero}
-  const generateSuggestedName = (file: File, index: number): string => {
-    const episodeNumber = String(index + 1).padStart(2, "0");
-    const baseName = `${folderName} - S01E${episodeNumber}`;
-    
-    // Adiciona extensão do arquivo original se não tiver
-    const lastDotIndex = file.name.lastIndexOf(".");
-    if (lastDotIndex !== -1) {
-      const extension = file.name.substring(lastDotIndex);
-      if (!baseName.toLowerCase().endsWith(extension.toLowerCase())) {
-        return baseName + extension;
-      }
-    }
-    
-    return baseName;
-  };
-
-  // Inicializa nomes sugeridos quando arquivos são adicionados
+  // Inicializa nomes com o nome original do arquivo se estiver vazio
   React.useEffect(() => {
-    files.forEach((fileItem, index) => {
+    files.forEach((fileItem) => {
       if (!fileItem.fileName.trim()) {
-        const suggestedName = generateSuggestedName(fileItem.file, index);
-        onFileNameChange(fileItem.id, suggestedName);
+        // Usa o nome original do arquivo (já vem pré-preenchido do multiple/index.tsx)
+        // Mas garante que se estiver vazio, preenche com o nome original
+        const extractFileName = (fileName: string): string => {
+          const lastDotIndex = fileName.lastIndexOf(".");
+          if (lastDotIndex === -1) return fileName;
+          return fileName.substring(0, lastDotIndex);
+        };
+        const originalName = extractFileName(fileItem.originalFileName);
+        onFileNameChange(fileItem.id, originalName);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files.length, folderName]);
+  }, [files.length]);
 
   return (
     <div className="space-y-4">

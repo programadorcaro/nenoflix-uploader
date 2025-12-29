@@ -1,20 +1,39 @@
-const MIN_CHUNK_SIZE = 50 * 1024 * 1024; // 50MB minimum (reduz overhead de requisições)
 const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
-const TARGET_CHUNKS = 100; // Target number of chunks (menos chunks = menos overhead)
 const MAX_PARALLEL_CHUNKS = 8; // Mais uploads simultâneos para melhor velocidade
 const MAX_RETRIES = 3;
 
 function calculateOptimalChunkSize(totalSize: number): number {
-  const idealChunkSize = Math.floor(totalSize / TARGET_CHUNKS);
-
-  if (idealChunkSize < MIN_CHUNK_SIZE) {
-    return MIN_CHUNK_SIZE;
+  // Configuração adaptativa baseada no tamanho do arquivo
+  // Para arquivos pequenos: mais chunks (melhor paralelização)
+  // Para arquivos grandes: menos chunks (menos overhead)
+  
+  let targetChunks: number;
+  let minChunkSize: number;
+  
+  if (totalSize < 500 * 1024 * 1024) {
+    // Arquivos pequenos (< 500MB): 20 chunks, mínimo 10MB
+    targetChunks = 20;
+    minChunkSize = 10 * 1024 * 1024;
+  } else if (totalSize < 5 * 1024 * 1024 * 1024) {
+    // Arquivos médios (500MB - 5GB): 50 chunks, mínimo 50MB
+    targetChunks = 50;
+    minChunkSize = 50 * 1024 * 1024;
+  } else {
+    // Arquivos grandes (> 5GB): 100 chunks, mínimo 50MB
+    targetChunks = 100;
+    minChunkSize = 50 * 1024 * 1024;
   }
-
+  
+  const idealChunkSize = Math.floor(totalSize / targetChunks);
+  
+  if (idealChunkSize < minChunkSize) {
+    return minChunkSize;
+  }
+  
   if (idealChunkSize > MAX_CHUNK_SIZE) {
     return MAX_CHUNK_SIZE;
   }
-
+  
   // Round to nearest MB for cleaner numbers
   return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
 }

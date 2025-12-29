@@ -124,25 +124,11 @@ export function Step3({
   // O nome já vem do Step 2 através do handleNextStep, mas garantimos aqui também
   React.useEffect(() => {
     if (step2Data.fileName && !step3Data.fileName.trim()) {
-      // Para séries/animes: adiciona o padrão se houver folderName
-      if (
-        (step1Data.contentType === "series" ||
-          step1Data.contentType === "animes") &&
-        folderName
-      ) {
-        // Se o nome já contém o padrão, não adiciona novamente
-        if (!step2Data.fileName.includes(" - S")) {
-          onDataChange({ fileName: `${folderName} - S01E01` });
-        } else {
-          onDataChange({ fileName: step2Data.fileName });
-        }
-      } else {
-        // Para filmes ou quando não há folderName: usa o nome do Step 2
-        onDataChange({ fileName: step2Data.fileName });
-      }
+      // Sempre usa o nome original do arquivo do Step 2
+      onDataChange({ fileName: step2Data.fileName });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step2Data.fileName, step1Data.contentType, folderName]);
+  }, [step2Data.fileName]);
 
   // Inicia o upload automaticamente quando entra no Step 3
   React.useEffect(() => {
@@ -415,17 +401,7 @@ export function Step3({
               </div>
 
               {uploadStatus !== "completing" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  {uploadSpeed !== undefined && uploadSpeed > 0 && (
-                    <div className="bg-background/50 rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Velocidade
-                      </p>
-                      <p className="text-base font-semibold text-foreground">
-                        {(uploadSpeed / 1024 / 1024).toFixed(2)} MB/s
-                      </p>
-                    </div>
-                  )}
+                <div className="text-sm">
                   {timeElapsed !== undefined && (
                     <div className="bg-background/50 rounded-lg p-3">
                       <p className="text-xs text-muted-foreground mb-1">
@@ -433,16 +409,6 @@ export function Step3({
                       </p>
                       <p className="text-base font-semibold text-foreground">
                         {formatTime(timeElapsed)}
-                      </p>
-                    </div>
-                  )}
-                  {timeRemaining !== null && timeRemaining !== undefined && (
-                    <div className="bg-primary/10 rounded-lg p-3 sm:col-span-2">
-                      <p className="text-xs text-primary mb-1">
-                        Tempo restante
-                      </p>
-                      <p className="text-base font-semibold text-primary">
-                        {formatTime(timeRemaining)}
                       </p>
                     </div>
                   )}

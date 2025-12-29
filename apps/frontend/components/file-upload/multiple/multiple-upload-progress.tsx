@@ -241,19 +241,7 @@ export function MultipleUploadProgress({
               </div>
 
               {currentFile.status !== "completing" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  {currentFile.uploadSpeed !== undefined &&
-                    currentFile.uploadSpeed > 0 && (
-                      <div className="bg-background/50 rounded-lg p-3">
-                        <p className="text-xs text-muted-foreground mb-1">
-                          Velocidade
-                        </p>
-                        <p className="text-base font-semibold text-foreground">
-                          {(currentFile.uploadSpeed / 1024 / 1024).toFixed(2)}{" "}
-                          MB/s
-                        </p>
-                      </div>
-                    )}
+                <div className="text-sm">
                   {currentFile.timeElapsed !== undefined && (
                     <div className="bg-background/50 rounded-lg p-3">
                       <p className="text-xs text-muted-foreground mb-1">
@@ -264,17 +252,6 @@ export function MultipleUploadProgress({
                       </p>
                     </div>
                   )}
-                  {currentFile.timeRemaining !== null &&
-                    currentFile.timeRemaining !== undefined && (
-                      <div className="bg-primary/10 rounded-lg p-3 sm:col-span-2">
-                        <p className="text-xs text-primary mb-1">
-                          Tempo restante
-                        </p>
-                        <p className="text-base font-semibold text-primary">
-                          {formatTime(currentFile.timeRemaining)}
-                        </p>
-                      </div>
-                    )}
                 </div>
               )}
             </div>
