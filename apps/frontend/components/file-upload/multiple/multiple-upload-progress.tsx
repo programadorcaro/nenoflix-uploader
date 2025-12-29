@@ -267,13 +267,16 @@ export function MultipleUploadProgress({
             const isCurrent = index === currentUploadIndex;
             const isCompleted = fileItem.status === "completed";
             const isError = fileItem.status === "error";
-            const isPending = fileItem.status === "pending";
+            const isUploading =
+              fileItem.status === "uploading" ||
+              fileItem.status === "completing";
+            const isPending = fileItem.status === "pending" && !isCurrent;
 
             return (
               <div
                 key={fileItem.id}
                 className={`p-3 rounded-lg border ${
-                  isCurrent
+                  isCurrent && isUploading
                     ? "border-primary bg-primary/5"
                     : isCompleted
                       ? "border-primary/20 bg-primary/5"
@@ -298,7 +301,7 @@ export function MultipleUploadProgress({
                     <p className="text-xs text-muted-foreground mt-1">
                       {formatFileSize(fileItem.file.size)}
                     </p>
-                    {isCurrent && (
+                    {isCurrent && isUploading && (
                       <div className="mt-2">
                         <Progress value={fileItem.progress} className="h-2" />
                       </div>
@@ -310,9 +313,11 @@ export function MultipleUploadProgress({
                     )}
                   </div>
                   <div className="shrink-0">
-                    {isCurrent && (
+                    {isCurrent && isUploading && (
                       <span className="text-xs font-semibold text-primary">
-                        Enviando...
+                        {fileItem.status === "completing"
+                          ? "Finalizando..."
+                          : "Enviando..."}
                       </span>
                     )}
                     {isCompleted && (

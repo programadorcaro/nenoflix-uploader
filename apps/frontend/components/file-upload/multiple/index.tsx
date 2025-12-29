@@ -124,6 +124,12 @@ export function MultipleUpload({
 
     // Upload em fila (um por vez) - usando a lista capturada
     for (let i = 0; i < filesToUpload.length; i++) {
+      // Delay de 10 segundos entre arquivos para aliviar stress do HD
+      // Apenas se não for o primeiro arquivo
+      if (i > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 10000));
+      }
+
       const fileItem = filesToUpload[i];
       if (!fileItem) continue;
       const fileId = fileItem.id;
@@ -256,12 +262,6 @@ export function MultipleUpload({
               : f
           ),
         }));
-
-        // Delay de 10 segundos entre arquivos para aliviar stress do HD
-        // Apenas se não for o último arquivo
-        if (i < filesToUpload.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-        }
       } catch (error) {
         if (chunker) {
           chunker.cancel();
