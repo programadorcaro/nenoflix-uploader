@@ -8,8 +8,6 @@ export interface MultipleFileItem {
   error?: string;
   uploadId?: string;
   timeElapsed?: number;
-  timeRemaining?: number | null;
-  uploadSpeed?: number;
   finalFilePath?: string;
 }
 

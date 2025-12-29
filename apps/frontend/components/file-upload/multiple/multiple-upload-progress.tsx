@@ -281,28 +281,6 @@ export function MultipleUploadProgress({
                                 </p>
                               </div>
                             )}
-                            {fileItem.uploadSpeed !== undefined &&
-                              fileItem.uploadSpeed > 0 && (
-                                <div className="bg-background/50 rounded p-2 flex-1 min-w-[120px]">
-                                  <p className="text-muted-foreground mb-0.5">
-                                    Velocidade
-                                  </p>
-                                  <p className="font-semibold text-foreground">
-                                    {formatFileSize(fileItem.uploadSpeed)}/s
-                                  </p>
-                                </div>
-                              )}
-                            {fileItem.timeRemaining !== null &&
-                              fileItem.timeRemaining !== undefined && (
-                                <div className="bg-background/50 rounded p-2 flex-1 min-w-[120px]">
-                                  <p className="text-muted-foreground mb-0.5">
-                                    Tempo restante
-                                  </p>
-                                  <p className="font-semibold text-foreground">
-                                    {formatTime(fileItem.timeRemaining)}
-                                  </p>
-                                </div>
-                              )}
                           </div>
                         )}
                       </div>

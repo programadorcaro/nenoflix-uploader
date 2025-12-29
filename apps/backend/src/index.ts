@@ -614,6 +614,9 @@ const app = new Elysia({ adapter: node() })
 
       uploadManager.deleteSession(uploadId);
 
+      // Delay de 10 segundos para aliviar stress do HD antes do próximo upload
+      await new Promise((resolve) => setTimeout(resolve, 10000));
+
       return {
         success: true,
         message: "File uploaded successfully",

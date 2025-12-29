@@ -190,8 +190,6 @@ export function MultipleUpload({
                     ...f,
                     progress: progress.percentage,
                     timeElapsed: progress.timeElapsed,
-                    timeRemaining: progress.timeRemaining,
-                    uploadSpeed: progress.uploadSpeed,
                   }
                 : f
             ),
