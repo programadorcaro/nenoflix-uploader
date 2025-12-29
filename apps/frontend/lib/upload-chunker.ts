@@ -6,10 +6,10 @@ function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
   // Para arquivos pequenos: mais chunks (melhor paralelização)
   // Para arquivos grandes: menos chunks (menos overhead)
-  
+
   let targetChunks: number;
   let minChunkSize: number;
-  
+
   if (totalSize < 500 * 1024 * 1024) {
     // Arquivos pequenos (< 500MB): 20 chunks, mínimo 10MB
     targetChunks = 20;
@@ -23,17 +23,17 @@ function calculateOptimalChunkSize(totalSize: number): number {
     targetChunks = 100;
     minChunkSize = 50 * 1024 * 1024;
   }
-  
+
   const idealChunkSize = Math.floor(totalSize / targetChunks);
-  
+
   if (idealChunkSize < minChunkSize) {
     return minChunkSize;
   }
-  
+
   if (idealChunkSize > MAX_CHUNK_SIZE) {
     return MAX_CHUNK_SIZE;
   }
-  
+
   // Round to nearest MB for cleaner numbers
   return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
 }
@@ -77,6 +77,7 @@ export class UploadChunker {
   private lastProgressBytes: number = 0;
   private progressInterval?: NodeJS.Timeout;
   private activeUploadBytes: Map<number, number>; // Track bytes uploaded for active chunks
+  private initialTimeRemaining: number | null = null; // Fixed time estimate calculated once
 
   constructor(file: File, backendUrl: string, chunkSize?: number) {
     this.file = file;
@@ -189,12 +190,20 @@ export class UploadChunker {
       uploadSpeed = uploadedBytes / timeElapsed;
     }
 
-    // Calculate time remaining
-    let timeRemaining: number | null = null;
-    if (uploadSpeed > 0 && uploadedBytes < this.file.size) {
+    // Calculate initial time remaining only once when we have a reliable speed estimate
+    // Wait for at least 2 seconds and some progress to ensure accuracy
+    if (
+      this.initialTimeRemaining === null &&
+      uploadSpeed > 0 &&
+      timeElapsed >= 2 &&
+      uploadedBytes > 0
+    ) {
       const remainingBytes = this.file.size - uploadedBytes;
-      timeRemaining = remainingBytes / uploadSpeed;
+      this.initialTimeRemaining = remainingBytes / uploadSpeed;
     }
+
+    // Use fixed time estimate if available, otherwise null
+    const timeRemaining: number | null = this.initialTimeRemaining;
 
     this.lastProgressTime = now;
     this.lastProgressBytes = uploadedBytes;
@@ -388,15 +397,12 @@ export class UploadChunker {
     }
 
     let uploadSpeed = 0;
-    let timeRemaining: number | null = null;
-
     if (timeElapsed > 0 && uploadedBytes > 0) {
       uploadSpeed = uploadedBytes / timeElapsed;
-      if (uploadSpeed > 0 && uploadedBytes < this.file.size) {
-        const remainingBytes = this.file.size - uploadedBytes;
-        timeRemaining = remainingBytes / uploadSpeed;
-      }
     }
+
+    // Use fixed time estimate if available
+    const timeRemaining: number | null = this.initialTimeRemaining;
 
     return {
       uploadedBytes,

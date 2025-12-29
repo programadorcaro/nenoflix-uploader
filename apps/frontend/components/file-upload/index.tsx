@@ -424,6 +424,11 @@ export function FileUpload({
                   onDataChange={updateStep2Data}
                   onBack={handleBackStep}
                   onNext={handleNextStep}
+                  contentType={state.step1.contentType}
+                  folderName={
+                    state.step1.selectedExistingFolder ||
+                    state.step1.subFolderName.trim()
+                  }
                 />
               )}
             </>

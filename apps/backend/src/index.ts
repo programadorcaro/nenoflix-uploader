@@ -572,19 +572,44 @@ const app = new Elysia({ adapter: node() })
             await moveFile(session.tempFilePath, targetPath);
           }
         }
+      }
 
-        // Clean up temp directory if empty
-        try {
-          const tempDir = dirname(session.tempFilePath);
-          if (existsSync(tempDir)) {
-            const entries = await readdir(tempDir);
-            if (entries.length === 0) {
-              await unlink(tempDir).catch(() => {});
-            }
-          }
-        } catch {
-          // Ignore cleanup errors
+      // Always clean up temp file if it still exists (in case of errors or edge cases)
+      try {
+        if (existsSync(session.tempFilePath)) {
+          await unlink(session.tempFilePath).catch(() => {
+            // Ignore if already deleted
+          });
         }
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      // Clean up temp directory if empty (only for this user's upload)
+      try {
+        const tempDir = dirname(session.tempFilePath);
+        if (existsSync(tempDir) && tempDir !== tmpBasePath) {
+          const entries = await readdir(tempDir);
+          if (entries.length === 0) {
+            const { rmdir } = await import("fs/promises");
+            await rmdir(tempDir).catch(() => {
+              // Ignore if directory not empty or other error
+            });
+          }
+        }
+
+        // Also try to remove base tmp directory if empty (only if no other uploads)
+        if (existsSync(tmpBasePath)) {
+          const baseEntries = await readdir(tmpBasePath);
+          if (baseEntries.length === 0) {
+            const { rmdir } = await import("fs/promises");
+            await rmdir(tmpBasePath).catch(() => {
+              // Ignore if directory not empty or other error
+            });
+          }
+        }
+      } catch {
+        // Ignore cleanup errors
       }
 
       uploadManager.deleteSession(uploadId);

@@ -33,7 +33,9 @@ export function MultipleUpload({
     error: null,
   });
 
-  const [currentStep, setCurrentStep] = React.useState<"select" | "names" | "upload">("select");
+  const [currentStep, setCurrentStep] = React.useState<
+    "select" | "names" | "upload"
+  >("select");
 
   // Extrai nome do arquivo sem extensão
   const extractFileName = (file: File): string => {
@@ -72,9 +74,7 @@ export function MultipleUpload({
   const handleFileNameChange = (id: string, fileName: string) => {
     setState((prev) => ({
       ...prev,
-      files: prev.files.map((f) =>
-        f.id === id ? { ...f, fileName } : f
-      ),
+      files: prev.files.map((f) => (f.id === id ? { ...f, fileName } : f)),
     }));
   };
 
@@ -108,10 +108,10 @@ export function MultipleUpload({
     if (!canStartUpload) return;
 
     setCurrentStep("upload");
-    
+
     // Captura a lista de arquivos atual antes de iniciar
     let filesToUpload: MultipleFileItem[] = [];
-    
+
     setState((prev) => {
       filesToUpload = prev.files;
       return {
@@ -125,6 +125,7 @@ export function MultipleUpload({
     // Upload em fila (um por vez) - usando a lista capturada
     for (let i = 0; i < filesToUpload.length; i++) {
       const fileItem = filesToUpload[i];
+      if (!fileItem) continue;
       const fileId = fileItem.id;
 
       // Atualiza índice atual e status para uploading
@@ -166,7 +167,11 @@ export function MultipleUpload({
 
         // Create chunker with optimal chunk size from backend
         const optimalChunkSize = initResult.chunkSize;
-        chunker = new UploadChunker(fileItem.file, BACKEND_URL, optimalChunkSize);
+        chunker = new UploadChunker(
+          fileItem.file,
+          BACKEND_URL,
+          optimalChunkSize
+        );
         chunker.setUploadId(uploadId);
 
         // Progress callback - igual ao upload único
@@ -251,6 +256,12 @@ export function MultipleUpload({
               : f
           ),
         }));
+
+        // Delay de 10 segundos entre arquivos para aliviar stress do HD
+        // Apenas se não for o último arquivo
+        if (i < filesToUpload.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+        }
       } catch (error) {
         if (chunker) {
           chunker.cancel();
@@ -351,6 +362,7 @@ export function MultipleUpload({
             files={state.files}
             onFileNameChange={handleFileNameChange}
             folderName={folderName}
+            contentType={contentType}
             disabled={state.isUploading}
           />
 
@@ -395,4 +407,3 @@ export function MultipleUpload({
     </div>
   );
 }
-

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { FileDropZone } from "./file-drop-zone";
-import type { Step2Data } from "../types";
+import type { Step2Data, ContentType } from "../types";
+import { generateSuggestedName } from "../utils/name-suggestion";
 
 interface Step2Props {
   data: Step2Data;
@@ -13,6 +14,8 @@ interface Step2Props {
   onDataChange: (data: Partial<Step2Data>) => void;
   onBack: () => void;
   onNext: () => void;
+  contentType?: ContentType;
+  folderName?: string;
 }
 
 export function Step2({
@@ -21,6 +24,8 @@ export function Step2({
   onDataChange,
   onBack,
   onNext,
+  contentType,
+  folderName = "",
 }: Step2Props) {
   const extractFileName = (file: File): string => {
     const lastDotIndex = file.name.lastIndexOf(".");
@@ -45,6 +50,26 @@ export function Step2({
     onDataChange({ fileName: value });
   };
 
+  const handleApplySuggestion = () => {
+    if (data.selectedFile && folderName) {
+      const suggestedName = generateSuggestedName(
+        folderName,
+        data.selectedFile.name,
+        0
+      );
+      onDataChange({ fileName: suggestedName });
+    }
+  };
+
+  const showSuggestion =
+    (contentType === "series" || contentType === "animes") &&
+    data.selectedFile &&
+    folderName;
+
+  const suggestedName = showSuggestion
+    ? generateSuggestedName(folderName, data.selectedFile.name, 0)
+    : null;
+
   const isFormValid = React.useMemo(() => {
     return data.selectedFile !== null && data.fileName.trim() !== "";
   }, [data.selectedFile, data.fileName]);
@@ -65,12 +90,48 @@ export function Step2({
 
       {data.selectedFile && (
         <Field>
-          <FieldLabel
-            htmlFor="file-name-step2"
-            className="text-base font-semibold mb-3"
-          >
-            Nome do Arquivo <span className="text-destructive">*</span>
-          </FieldLabel>
+          <div className="flex items-center gap-2 mb-3">
+            <FieldLabel
+              htmlFor="file-name-step2"
+              className="text-base font-semibold"
+            >
+              Nome do Arquivo <span className="text-destructive">*</span>
+            </FieldLabel>
+            {showSuggestion && suggestedName && (
+              <div className="group relative">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4 text-muted-foreground cursor-help"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                  <path d="M12 17h.01" />
+                </svg>
+                <div className="absolute left-0 top-6 z-10 hidden group-hover:block w-64 p-2 bg-popover border border-border rounded-md shadow-md text-xs text-popover-foreground">
+                  <p className="font-semibold mb-1">Sugestão:</p>
+                  <p className="text-muted-foreground">{suggestedName}</p>
+                </div>
+              </div>
+            )}
+            {showSuggestion && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleApplySuggestion}
+                disabled={isUploading}
+                className="text-xs ml-auto"
+              >
+                Aplicar sugestão
+              </Button>
+            )}
+          </div>
           <Input
             id="file-name-step2"
             placeholder="Digite o nome do arquivo"
