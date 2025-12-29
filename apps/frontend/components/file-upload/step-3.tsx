@@ -211,6 +211,31 @@ export function Step3({
     }
   };
 
+  // Tempo estimado fixo, calculado apenas uma vez quando temos velocidade confiável
+  const [fixedEstimatedTime, setFixedEstimatedTime] = React.useState<
+    string | null
+  >(null);
+
+  React.useEffect(() => {
+    // Calcula o tempo estimado apenas uma vez quando temos velocidade confiável
+    // Espera pelo menos 2 segundos e alguma velocidade para garantir precisão
+    if (
+      step2Data.selectedFile &&
+      uploadSpeed &&
+      uploadSpeed > 0 &&
+      timeElapsed &&
+      timeElapsed >= 2 &&
+      !fixedEstimatedTime
+    ) {
+      const speedMBps = uploadSpeed / 1024 / 1024;
+      const estimated = estimateUploadTime(
+        step2Data.selectedFile.size,
+        speedMBps
+      );
+      setFixedEstimatedTime(estimated);
+    }
+  }, [uploadSpeed, timeElapsed, step2Data.selectedFile, fixedEstimatedTime]);
+
   // Resumo das informações (deve ser antes dos early returns)
   const summaryItems = React.useMemo(() => {
     const items: Array<{ label: string; value: string }> = [];
@@ -229,15 +254,23 @@ export function Step3({
         value: formatFileSize(step2Data.selectedFile.size),
       });
 
-      const estimatedTime = estimateUploadTime(
-        step2Data.selectedFile.size,
-        uploadSpeed ? uploadSpeed / 1024 / 1024 : undefined
-      );
+      // Usa o tempo estimado fixo se disponível, caso contrário calcula com velocidade padrão
+      const estimatedTime =
+        fixedEstimatedTime ||
+        estimateUploadTime(
+          step2Data.selectedFile.size,
+          undefined // Usa velocidade padrão de 10 MB/s se ainda não tiver velocidade confiável
+        );
       items.push({ label: "Tempo estimado", value: estimatedTime });
     }
 
     return items;
-  }, [folderName, step3Data.fileName, step2Data.selectedFile, uploadSpeed]);
+  }, [
+    folderName,
+    step3Data.fileName,
+    step2Data.selectedFile,
+    fixedEstimatedTime,
+  ]);
 
   if (uploadStatus === "success") {
     return (
