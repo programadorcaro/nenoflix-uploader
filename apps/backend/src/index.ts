@@ -20,10 +20,10 @@ function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
   // Para arquivos pequenos: mais chunks (melhor paralelização)
   // Para arquivos grandes: menos chunks (menos overhead)
-  
+
   let targetChunks: number;
   let minChunkSize: number;
-  
+
   if (totalSize < 500 * 1024 * 1024) {
     // Arquivos pequenos (< 500MB): 20 chunks, mínimo 10MB
     targetChunks = 20;
@@ -37,17 +37,17 @@ function calculateOptimalChunkSize(totalSize: number): number {
     targetChunks = 100;
     minChunkSize = 50 * 1024 * 1024;
   }
-  
+
   const idealChunkSize = Math.floor(totalSize / targetChunks);
-  
+
   if (idealChunkSize < minChunkSize) {
     return minChunkSize;
   }
-  
+
   if (idealChunkSize > MAX_CHUNK_SIZE) {
     return MAX_CHUNK_SIZE;
   }
-  
+
   // Round to nearest MB for cleaner numbers
   return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
 }
@@ -224,11 +224,18 @@ async function ensureDirectoryExists(dirPath: string): Promise<void> {
 }
 
 function sanitizeFileName(fileName: string): string {
-  return fileName.replace(/[^a-zA-Z0-9._-]/g, "");
+  // Remove apenas caracteres perigosos para sistema de arquivos
+  // Permite: letras, números, espaços, pontos, underscores, hífens
+  // Remove: /, \, :, *, ?, ", <, >, |, e caracteres de controle
+  return fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
 }
 
 function sanitizeFolderName(folderName: string | null): string {
-  return folderName ? folderName.replace(/[^a-zA-Z0-9_-]/g, "") : "";
+  if (!folderName) return "";
+  // Remove apenas caracteres perigosos para sistema de arquivos
+  // Permite: letras, números, espaços, underscores, hífens
+  // Remove: /, \, :, *, ?, ", <, >, |, ., e caracteres de controle
+  return folderName.replace(/[<>:"/\\|?*.\x00-\x1F]/g, "").trim();
 }
 
 function resolveDestinationPath(destinationPath: string): string {
@@ -636,9 +643,7 @@ const app = new Elysia({ adapter: node() })
       }
 
       // folderName é opcional (usado apenas para séries/animes)
-      const sanitizedFolderName = folderName
-        ? folderName.replace(/[^a-zA-Z0-9_-]/g, "")
-        : "";
+      const sanitizedFolderName = sanitizeFolderName(folderName ?? null);
 
       const fileExtension = extname(file.name).toLowerCase();
       if (!ALLOWED_EXTENSIONS.includes(fileExtension)) {
@@ -647,7 +652,7 @@ const app = new Elysia({ adapter: node() })
           error: `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`,
         };
       }
-      let sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, "");
+      let sanitizedFileName = sanitizeFileName(fileName);
 
       // Add extension from original file if not present in fileName
       if (!sanitizedFileName.toLowerCase().endsWith(fileExtension)) {
