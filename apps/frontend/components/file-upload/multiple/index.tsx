@@ -107,29 +107,24 @@ export function MultipleUpload({
   const handleStartUpload = async () => {
     if (!canStartUpload) return;
 
+    // Captura a lista de arquivos atual antes de iniciar
+    const filesToUpload = [...state.files];
+
+    // Atualiza estado e muda para step de upload
+    setState((prev) => ({
+      ...prev,
+      isUploading: true,
+      currentUploadIndex: 0,
+      error: null,
+    }));
+
     setCurrentStep("upload");
 
-    // Captura a lista de arquivos atual antes de iniciar
-    let filesToUpload: MultipleFileItem[] = [];
-
-    setState((prev) => {
-      filesToUpload = prev.files;
-      return {
-        ...prev,
-        isUploading: true,
-        currentUploadIndex: 0,
-        error: null,
-      };
-    });
+    // Pequeno delay para garantir que o React renderize a mudança de step
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // Upload em fila (um por vez) - usando a lista capturada
     for (let i = 0; i < filesToUpload.length; i++) {
-      // Delay de 10 segundos entre arquivos para aliviar stress do HD
-      // Apenas se não for o primeiro arquivo
-      if (i > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 10000));
-      }
-
       const fileItem = filesToUpload[i];
       if (!fileItem) continue;
       const fileId = fileItem.id;
@@ -144,6 +139,11 @@ export function MultipleUpload({
             : f
         ),
       }));
+
+      // Pequeno delay para garantir que o React processe a atualização de estado
+      if (i === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
 
       let chunker: UploadChunker | null = null;
 

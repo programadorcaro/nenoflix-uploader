@@ -28,6 +28,7 @@ export default function RootLayout({
     <html lang="en" className={outfit.variable}>
       <body
         className={`dark ${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning={true}
       >
         {children}
       </body>
