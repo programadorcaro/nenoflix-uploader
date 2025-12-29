@@ -75,9 +75,6 @@ export function MultipleUploadProgress({
   const allCompleted = files.every(
     (f) => f.status === "completed" || f.status === "error"
   );
-  const currentFile = files[currentUploadIndex];
-  const isUploading =
-    currentFile?.status === "uploading" || currentFile?.status === "completing";
 
   if (allCompleted) {
     const allSuccess = errorCount === 0;
@@ -85,7 +82,7 @@ export function MultipleUploadProgress({
       <div className="space-y-6 relative">
         <div className="text-center py-8 sm:py-12">
           <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
-            <div className="relative">
+            <div className="relative w-full max-w-32 aspect-square mx-auto">
               <Image
                 src={allSuccess ? "/sucess.jpg" : "/error.jpg"}
                 alt={allSuccess ? "Sucesso" : "Erro"}
@@ -201,64 +198,6 @@ export function MultipleUploadProgress({
         />
       </div>
 
-      {/* Arquivo atual sendo enviado */}
-      {isUploading && currentFile && (
-        <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-6 sm:p-8">
-          <div className="flex flex-col sm:flex-row items-center gap-6">
-            <div className="shrink-0 max-w-32 sm:max-w-40">
-              <div className="relative w-full max-w-32 aspect-square mx-auto">
-                <Image
-                  src="/loading.jpg"
-                  alt="Carregando"
-                  width={400}
-                  height={300}
-                  className="w-full h-auto object-cover rounded-2xl shadow-2xl"
-                  priority
-                />
-                <div className="absolute inset-0 bg-primary/10 rounded-2xl blur-xl -z-10" />
-              </div>
-            </div>
-            <div className="flex-1 w-full space-y-4">
-              <div>
-                <h3 className="text-lg sm:text-xl font-semibold mb-2">
-                  {currentFile.status === "completing"
-                    ? "Finalizando upload..."
-                    : `Enviando: ${currentFile.fileName}`}
-                </h3>
-                <Progress
-                  value={
-                    currentFile.status === "completing"
-                      ? 100
-                      : currentFile.progress
-                  }
-                  className="h-3 mb-3"
-                />
-                <p className="text-sm text-muted-foreground">
-                  {currentFile.status === "completing"
-                    ? "100% concluído"
-                    : `${Math.round(currentFile.progress)}% concluído`}
-                </p>
-              </div>
-
-              {currentFile.status !== "completing" && (
-                <div className="text-sm">
-                  {currentFile.timeElapsed !== undefined && (
-                    <div className="bg-background/50 rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Tempo decorrido
-                      </p>
-                      <p className="text-base font-semibold text-foreground">
-                        {formatTime(currentFile.timeElapsed)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Lista de arquivos */}
       <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm">
         <h4 className="text-base font-semibold mb-4">Lista de arquivos</h4>
@@ -275,9 +214,9 @@ export function MultipleUploadProgress({
             return (
               <div
                 key={fileItem.id}
-                className={`p-3 rounded-lg border ${
+                className={`p-4 rounded-lg border ${
                   isCurrent && isUploading
-                    ? "border-primary bg-primary/5"
+                    ? "border-2 border-primary bg-primary/5"
                     : isCompleted
                       ? "border-primary/20 bg-primary/5"
                       : isError
@@ -294,6 +233,13 @@ export function MultipleUploadProgress({
                       <p className="text-sm font-medium text-foreground truncate">
                         {fileItem.fileName}
                       </p>
+                      {isCurrent && isUploading && (
+                        <span className="text-xs font-semibold text-primary">
+                          {fileItem.status === "completing"
+                            ? "Finalizando..."
+                            : "Enviando..."}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
                       {fileItem.originalFileName}
@@ -302,8 +248,63 @@ export function MultipleUploadProgress({
                       {formatFileSize(fileItem.file.size)}
                     </p>
                     {isCurrent && isUploading && (
-                      <div className="mt-2">
-                        <Progress value={fileItem.progress} className="h-2" />
+                      <div className="mt-3 space-y-2">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-muted-foreground">
+                              Progresso
+                            </span>
+                            <span className="text-xs font-semibold text-foreground">
+                              {fileItem.status === "completing"
+                                ? "100%"
+                                : `${Math.round(fileItem.progress)}%`}
+                            </span>
+                          </div>
+                          <Progress
+                            value={
+                              fileItem.status === "completing"
+                                ? 100
+                                : fileItem.progress
+                            }
+                            className="h-2"
+                          />
+                        </div>
+                        {fileItem.status !== "completing" && (
+                          <div className="flex flex-wrap gap-2 text-xs">
+                            {fileItem.timeElapsed !== undefined && (
+                              <div className="bg-background/50 rounded p-2 flex-1 min-w-[120px]">
+                                <p className="text-muted-foreground mb-0.5">
+                                  Tempo decorrido
+                                </p>
+                                <p className="font-semibold text-foreground">
+                                  {formatTime(fileItem.timeElapsed)}
+                                </p>
+                              </div>
+                            )}
+                            {fileItem.uploadSpeed !== undefined &&
+                              fileItem.uploadSpeed > 0 && (
+                                <div className="bg-background/50 rounded p-2 flex-1 min-w-[120px]">
+                                  <p className="text-muted-foreground mb-0.5">
+                                    Velocidade
+                                  </p>
+                                  <p className="font-semibold text-foreground">
+                                    {formatFileSize(fileItem.uploadSpeed)}/s
+                                  </p>
+                                </div>
+                              )}
+                            {fileItem.timeRemaining !== null &&
+                              fileItem.timeRemaining !== undefined && (
+                                <div className="bg-background/50 rounded p-2 flex-1 min-w-[120px]">
+                                  <p className="text-muted-foreground mb-0.5">
+                                    Tempo restante
+                                  </p>
+                                  <p className="font-semibold text-foreground">
+                                    {formatTime(fileItem.timeRemaining)}
+                                  </p>
+                                </div>
+                              )}
+                          </div>
+                        )}
                       </div>
                     )}
                     {isError && fileItem.error && (
@@ -313,13 +314,6 @@ export function MultipleUploadProgress({
                     )}
                   </div>
                   <div className="shrink-0">
-                    {isCurrent && isUploading && (
-                      <span className="text-xs font-semibold text-primary">
-                        {fileItem.status === "completing"
-                          ? "Finalizando..."
-                          : "Enviando..."}
-                      </span>
-                    )}
                     {isCompleted && (
                       <span className="text-xs font-semibold text-primary">
                         ✓ Concluído
