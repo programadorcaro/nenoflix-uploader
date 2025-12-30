@@ -1,5 +1,5 @@
 const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
-const MAX_PARALLEL_CHUNKS = 8; // Mais uploads simultâneos para melhor velocidade
+const MAX_PARALLEL_CHUNKS = 5; // Limite de uploads simultâneos para estabilidade do sistema
 const MAX_RETRIES = 3;
 
 function calculateOptimalChunkSize(totalSize: number): number {
