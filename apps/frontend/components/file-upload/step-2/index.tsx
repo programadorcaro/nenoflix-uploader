@@ -66,7 +66,7 @@ export function Step2({
     data.selectedFile &&
     folderName;
 
-  const suggestedName = showSuggestion
+  const suggestedName = showSuggestion && data.selectedFile
     ? generateSuggestedName(folderName, data.selectedFile.name, 0)
     : null;
 
