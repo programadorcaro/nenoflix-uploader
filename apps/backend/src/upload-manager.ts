@@ -16,7 +16,7 @@ export interface UploadSession {
 }
 
 const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
-const CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
+const CLEANUP_INTERVAL = 20 * 60 * 1000; // 20 minutes
 
 class UploadManager {
   private sessions: Map<string, UploadSession> = new Map();
@@ -105,7 +105,9 @@ class UploadManager {
       return null;
     }
 
-    const receivedChunks = Array.from(session.receivedChunks).sort((a, b) => a - b);
+    const receivedChunks = Array.from(session.receivedChunks).sort(
+      (a, b) => a - b
+    );
     const missingChunks: number[] = [];
 
     for (let i = 0; i < session.totalChunks; i++) {
@@ -157,10 +159,11 @@ class UploadManager {
     }
 
     if (expiredUploadIds.length > 0) {
-      console.log(`Cleaned up ${expiredUploadIds.length} expired upload sessions`);
+      console.log(
+        `Cleaned up ${expiredUploadIds.length} expired upload sessions`
+      );
     }
   }
 }
 
 export const uploadManager = new UploadManager();
-
