@@ -1,6 +1,8 @@
 const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
 const MAX_PARALLEL_CHUNKS = 5; // Limite de uploads simultâneos para estabilidade do sistema
 const MAX_RETRIES = 3;
+const CHUNK_UPLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutos por chunk
+const STUCK_CHUNK_THRESHOLD = 10 * 60 * 1000; // 10 minutos para considerar chunk preso
 
 function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
@@ -78,6 +80,7 @@ export class UploadChunker {
   private progressInterval?: NodeJS.Timeout;
   private activeUploadBytes: Map<number, number>; // Track bytes uploaded for active chunks
   private initialTimeRemaining: number | null = null; // Fixed time estimate calculated once
+  private chunkUploadStartTimes: Map<number, number>; // Track when each chunk started uploading
 
   constructor(file: File, backendUrl: string, chunkSize?: number) {
     this.file = file;
@@ -95,6 +98,7 @@ export class UploadChunker {
       });
     });
     this.activeUploadBytes = new Map();
+    this.chunkUploadStartTimes = new Map();
   }
 
   setProgressCallback(callback: (progress: UploadProgress) => void): void {
@@ -231,6 +235,8 @@ export class UploadChunker {
     }
 
     status.status = "uploading";
+    const uploadStartTime = Date.now();
+    this.chunkUploadStartTimes.set(chunk.index, uploadStartTime);
     this.updateProgress();
 
     const blob = this.getChunkBlob(chunk);
@@ -242,6 +248,11 @@ export class UploadChunker {
     const controller = new AbortController();
     this.abortControllers.set(chunk.index, controller);
 
+    // Set up timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, CHUNK_UPLOAD_TIMEOUT);
+
     try {
       const response = await fetch(`${this.backendUrl}/upload/chunk`, {
         method: "POST",
@@ -249,23 +260,55 @@ export class UploadChunker {
         signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const result = await response.json();
 
       if (result.success) {
         status.status = "completed";
+        this.chunkUploadStartTimes.delete(chunk.index);
         this.updateProgress();
         return true;
       } else {
         throw new Error(result.error || "Chunk upload failed");
       }
     } catch (error) {
+      clearTimeout(timeoutId);
+
+      // Handle abort errors (timeout or manual cancellation)
       if (error instanceof Error && error.name === "AbortError") {
         status.status = "pending";
+        status.error = "Upload timeout or cancelled";
+        this.chunkUploadStartTimes.delete(chunk.index);
         return false;
       }
 
-      status.error = error instanceof Error ? error.message : "Unknown error";
-      status.status = "failed";
+      // Handle network errors (ECONNRESET, network failures, etc.)
+      const isNetworkError =
+        error instanceof TypeError ||
+        (error instanceof Error &&
+          (error.message.includes("fetch") ||
+            error.message.includes("network") ||
+            error.message.includes("Failed to fetch") ||
+            error.message.includes("ECONNRESET") ||
+            error.message.includes("aborted")));
+
+      if (isNetworkError) {
+        status.error =
+          error instanceof Error
+            ? error.message
+            : "Network error during upload";
+        status.status = "failed";
+      } else {
+        status.error = error instanceof Error ? error.message : "Unknown error";
+        status.status = "failed";
+      }
+
+      this.chunkUploadStartTimes.delete(chunk.index);
       this.updateProgress();
       return false;
     } finally {
@@ -274,6 +317,9 @@ export class UploadChunker {
   }
 
   private getPendingChunks(): number[] {
+    // First, detect and reset any stuck chunks
+    this.detectStuckChunks();
+
     const pending: number[] = [];
 
     for (const [index, status] of this.chunkStatuses.entries()) {
@@ -293,6 +339,38 @@ export class UploadChunker {
       }
     }
     return active;
+  }
+
+  private detectStuckChunks(): void {
+    const now = Date.now();
+    const stuckChunks: number[] = [];
+
+    for (const [index, status] of this.chunkStatuses.entries()) {
+      if (status.status === "uploading") {
+        const startTime = this.chunkUploadStartTimes.get(index);
+        if (startTime && now - startTime > STUCK_CHUNK_THRESHOLD) {
+          stuckChunks.push(index);
+        }
+      }
+    }
+
+    // Reset stuck chunks to pending
+    for (const chunkIndex of stuckChunks) {
+      const status = this.chunkStatuses.get(chunkIndex);
+      if (status) {
+        // Abort any ongoing request
+        const controller = this.abortControllers.get(chunkIndex);
+        if (controller) {
+          controller.abort();
+          this.abortControllers.delete(chunkIndex);
+        }
+
+        // Reset status
+        status.status = "pending";
+        status.error = "Chunk stuck in uploading state, reset for retry";
+        this.chunkUploadStartTimes.delete(chunkIndex);
+      }
+    }
   }
 
   async uploadAll(): Promise<void> {
@@ -377,6 +455,7 @@ export class UploadChunker {
     }
     this.abortControllers.clear();
     this.activeUploadBytes.clear();
+    this.chunkUploadStartTimes.clear();
   }
 
   getProgress(): UploadProgress {
