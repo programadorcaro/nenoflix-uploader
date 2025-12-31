@@ -6,23 +6,23 @@ const STUCK_CHUNK_THRESHOLD = 10 * 60 * 1000; // 10 minutos para considerar chun
 
 function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
-  // Para arquivos pequenos: mais chunks (melhor paralelização)
-  // Para arquivos grandes: menos chunks (menos overhead)
+  // Aumentamos o número de chunks para reduzir o tamanho individual
+  // e evitar timeouts, mantendo 5 chunks simultâneos
 
   let targetChunks: number;
   let minChunkSize: number;
 
   if (totalSize < 500 * 1024 * 1024) {
-    // Arquivos pequenos (< 500MB): 20 chunks, mínimo 10MB
-    targetChunks = 20;
+    // Arquivos pequenos (< 500MB): 40 chunks, mínimo 10MB
+    targetChunks = 40;
     minChunkSize = 10 * 1024 * 1024;
   } else if (totalSize < 5 * 1024 * 1024 * 1024) {
-    // Arquivos médios (500MB - 5GB): 50 chunks, mínimo 50MB
-    targetChunks = 50;
+    // Arquivos médios (500MB - 5GB): 100 chunks, mínimo 50MB
+    targetChunks = 100;
     minChunkSize = 50 * 1024 * 1024;
   } else {
-    // Arquivos grandes (> 5GB): 100 chunks, mínimo 50MB
-    targetChunks = 100;
+    // Arquivos grandes (> 5GB): 200 chunks, mínimo 50MB
+    targetChunks = 200;
     minChunkSize = 50 * 1024 * 1024;
   }
 
