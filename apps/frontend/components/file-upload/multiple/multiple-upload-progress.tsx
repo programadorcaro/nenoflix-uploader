@@ -9,15 +9,35 @@ import type { MultipleFileItem } from "./types";
 interface MultipleUploadProgressProps {
   files: MultipleFileItem[];
   currentUploadIndex: number;
-  contentType: "series" | "animes";
+  contentType: "series" | "animes" | "movies";
   onReset: () => void;
 }
 
 function formatFilePath(
   finalFilePath: string,
-  contentType: "series" | "animes"
+  contentType: "series" | "animes" | "movies"
 ): string {
   const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
+  
+  if (contentType === "movies") {
+    // Para filmes, retorna apenas /Movies/{nome_do_arquivo}
+    const moviesIndex = pathParts.findIndex(
+      (part) =>
+        part === "Movies" ||
+        part.toLowerCase() === "movies"
+    );
+    
+    if (moviesIndex !== -1) {
+      // Pega o nome do arquivo (última parte do caminho)
+      const fileName = pathParts[pathParts.length - 1];
+      return `/Movies/${fileName}`;
+    }
+    
+    // Fallback: retorna apenas o nome do arquivo
+    return pathParts[pathParts.length - 1] || finalFilePath;
+  }
+  
+  // Para séries e animes, mantém a lógica original
   const contentTypeName = contentType === "series" ? "Series" : "Animes";
   const contentTypeIndex = pathParts.findIndex(
     (part) =>

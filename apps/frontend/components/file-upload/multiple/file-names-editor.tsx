@@ -11,7 +11,7 @@ interface FileNamesEditorProps {
   files: MultipleFileItem[];
   onFileNameChange: (id: string, fileName: string) => void;
   folderName: string;
-  contentType: "series" | "animes";
+  contentType: "series" | "animes" | "movies";
   disabled?: boolean;
 }
 

@@ -406,11 +406,14 @@ export function FileUpload({
             <>
               {state.step1.useMultipleUpload &&
               (state.step1.contentType === "series" ||
-                state.step1.contentType === "animes") ? (
+                state.step1.contentType === "animes" ||
+                state.step1.contentType === "movies") ? (
                 <MultipleUpload
                   folderName={
-                    state.step1.selectedExistingFolder ||
-                    state.step1.subFolderName.trim()
+                    state.step1.contentType === "movies"
+                      ? ""
+                      : state.step1.selectedExistingFolder ||
+                        state.step1.subFolderName.trim()
                   }
                   destinationPath={getFinalDestinationPath()}
                   contentType={state.step1.contentType}

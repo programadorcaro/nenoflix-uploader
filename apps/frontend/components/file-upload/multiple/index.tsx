@@ -13,7 +13,7 @@ import { UploadStateManager } from "@/lib/upload-state";
 interface MultipleUploadProps {
   folderName: string;
   destinationPath: string;
-  contentType: "series" | "animes";
+  contentType: "series" | "animes" | "movies";
   onComplete?: () => void;
   onReset: () => void;
 }
