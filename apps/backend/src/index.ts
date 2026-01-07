@@ -25,16 +25,16 @@ function calculateOptimalChunkSize(totalSize: number): number {
   let minChunkSize: number;
 
   if (totalSize < 500 * 1024 * 1024) {
-    // Arquivos pequenos (< 500MB): 40 chunks, mínimo 10MB
-    targetChunks = 40;
+    // Arquivos pequenos (< 500MB): 80 chunks, mínimo 10MB
+    targetChunks = 80;
     minChunkSize = 10 * 1024 * 1024;
   } else if (totalSize < 5 * 1024 * 1024 * 1024) {
-    // Arquivos médios (500MB - 5GB): 100 chunks, mínimo 50MB
-    targetChunks = 100;
+    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 50MB
+    targetChunks = 200;
     minChunkSize = 50 * 1024 * 1024;
   } else {
-    // Arquivos grandes (> 5GB): 200 chunks, mínimo 50MB
-    targetChunks = 200;
+    // Arquivos grandes (> 5GB): 400 chunks, mínimo 50MB
+    targetChunks = 400;
     minChunkSize = 50 * 1024 * 1024;
   }
 

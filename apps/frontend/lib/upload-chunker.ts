@@ -1,7 +1,7 @@
 const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
 const MAX_PARALLEL_CHUNKS = 5; // Limite de uploads simultâneos para estabilidade do sistema
 const MAX_RETRIES = 3;
-const CHUNK_UPLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutos por chunk
+const CHUNK_UPLOAD_TIMEOUT = 3 * 60 * 1000; // 3 minutos por chunk (reduzido de 5)
 const STUCK_CHUNK_THRESHOLD = 10 * 60 * 1000; // 10 minutos para considerar chunk preso
 
 function calculateOptimalChunkSize(totalSize: number): number {
@@ -13,16 +13,16 @@ function calculateOptimalChunkSize(totalSize: number): number {
   let minChunkSize: number;
 
   if (totalSize < 500 * 1024 * 1024) {
-    // Arquivos pequenos (< 500MB): 40 chunks, mínimo 10MB
-    targetChunks = 40;
+    // Arquivos pequenos (< 500MB): 80 chunks, mínimo 10MB
+    targetChunks = 80;
     minChunkSize = 10 * 1024 * 1024;
   } else if (totalSize < 5 * 1024 * 1024 * 1024) {
-    // Arquivos médios (500MB - 5GB): 100 chunks, mínimo 50MB
-    targetChunks = 100;
+    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 50MB
+    targetChunks = 200;
     minChunkSize = 50 * 1024 * 1024;
   } else {
-    // Arquivos grandes (> 5GB): 200 chunks, mínimo 50MB
-    targetChunks = 200;
+    // Arquivos grandes (> 5GB): 400 chunks, mínimo 50MB
+    targetChunks = 400;
     minChunkSize = 50 * 1024 * 1024;
   }
 
