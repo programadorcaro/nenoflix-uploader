@@ -12,30 +12,29 @@ import { writeChunk, validateFileIntegrity } from "./chunk-handler.js";
 
 const PORT = 8098;
 const DEFAULT_TMP_DIR = "tmp";
-const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
+const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB máximo (reduzido de 200MB para melhorar em conexões lentas)
 
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
 
 function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
-  // Aumentamos o número de chunks para reduzir o tamanho individual
-  // e evitar timeouts, mantendo 5 chunks simultâneos
+  // Criamos mais chunks menores para reduzir risco de timeout e melhorar recuperação
 
   let targetChunks: number;
   let minChunkSize: number;
 
   if (totalSize < 500 * 1024 * 1024) {
-    // Arquivos pequenos (< 500MB): 80 chunks, mínimo 10MB
-    targetChunks = 80;
-    minChunkSize = 10 * 1024 * 1024;
+    // Arquivos pequenos (< 500MB): 100 chunks, mínimo 1MB
+    targetChunks = 100;
+    minChunkSize = 1 * 1024 * 1024;
   } else if (totalSize < 5 * 1024 * 1024 * 1024) {
-    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 50MB
+    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 2MB
     targetChunks = 200;
-    minChunkSize = 50 * 1024 * 1024;
+    minChunkSize = 2 * 1024 * 1024;
   } else {
-    // Arquivos grandes (> 5GB): 400 chunks, mínimo 50MB
-    targetChunks = 400;
-    minChunkSize = 50 * 1024 * 1024;
+    // Arquivos grandes (> 5GB): 300 chunks, mínimo 5MB
+    targetChunks = 300;
+    minChunkSize = 5 * 1024 * 1024;
   }
 
   const idealChunkSize = Math.floor(totalSize / targetChunks);

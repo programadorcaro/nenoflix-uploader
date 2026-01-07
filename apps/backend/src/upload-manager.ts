@@ -15,8 +15,9 @@ export interface UploadSession {
   lastActivity: number;
 }
 
-const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_TTL = 48 * 60 * 60 * 1000; // 48 hours (aumentado de 24h)
 const CLEANUP_INTERVAL = 20 * 60 * 1000; // 20 minutes
+const ACTIVE_SESSION_THRESHOLD = 5 * 60 * 1000; // 5 minutos - considerar sessão ativa se teve atividade recente
 
 class UploadManager {
   private sessions: Map<string, UploadSession> = new Map();
@@ -149,7 +150,20 @@ class UploadManager {
 
     for (const [uploadId, session] of this.sessions.entries()) {
       const age = now - session.lastActivity;
-      if (age > SESSION_TTL) {
+      const timeSinceCreation = now - session.createdAt;
+
+      // Não deletar sessões que estão ativas (atividade recente)
+      const isActive = age < ACTIVE_SESSION_THRESHOLD;
+
+      // Só deletar se:
+      // 1. Passou o TTL desde a última atividade E
+      // 2. Não está ativa (sem atividade recente) E
+      // 3. Passou pelo menos 1 hora desde a criação (evitar deletar sessões recém-criadas)
+      if (
+        age > SESSION_TTL &&
+        !isActive &&
+        timeSinceCreation > 60 * 60 * 1000
+      ) {
         expiredUploadIds.push(uploadId);
       }
     }

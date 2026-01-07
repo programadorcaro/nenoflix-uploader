@@ -1,29 +1,32 @@
-const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
-const MAX_PARALLEL_CHUNKS = 5; // Limite de uploads simultâneos para estabilidade do sistema
-const MAX_RETRIES = 3;
-const CHUNK_UPLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutos por chunk
-const STUCK_CHUNK_THRESHOLD = 6 * 60 * 1000; // 6 minutos para considerar chunk preso (timeout é 5min)
+const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB máximo (reduzido de 200MB para melhorar em conexões lentas)
+const MAX_PARALLEL_CHUNKS = 5; // Máximo de uploads simultâneos
+const MIN_PARALLEL_CHUNKS = 1; // Mínimo de uploads simultâneos (começa conservador)
+const MAX_RETRIES = 5; // Aumentado para permitir mais tentativas com backoff
+const MIN_TIMEOUT = 30 * 1000; // 30 segundos mínimo
+const MAX_TIMEOUT = 10 * 60 * 1000; // 10 minutos máximo
+const STUCK_CHUNK_THRESHOLD = 2 * 60 * 1000; // 2 minutos para considerar chunk preso (reduzido de 6min)
+const SERVER_STATUS_CHECK_INTERVAL = 10 * 1000; // Verificar status do servidor a cada 10 segundos
+const PARALLELISM_ADJUST_INTERVAL = 5 * 1000; // Ajustar paralelismo a cada 5 segundos
 
 function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
-  // Aumentamos o número de chunks para reduzir o tamanho individual
-  // e evitar timeouts, mantendo 5 chunks simultâneos
+  // Criamos mais chunks menores para reduzir risco de timeout e melhorar recuperação
 
   let targetChunks: number;
   let minChunkSize: number;
 
   if (totalSize < 500 * 1024 * 1024) {
-    // Arquivos pequenos (< 500MB): 80 chunks, mínimo 10MB
-    targetChunks = 80;
-    minChunkSize = 10 * 1024 * 1024;
+    // Arquivos pequenos (< 500MB): 100 chunks, mínimo 1MB
+    targetChunks = 100;
+    minChunkSize = 1 * 1024 * 1024;
   } else if (totalSize < 5 * 1024 * 1024 * 1024) {
-    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 50MB
+    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 2MB
     targetChunks = 200;
-    minChunkSize = 50 * 1024 * 1024;
+    minChunkSize = 2 * 1024 * 1024;
   } else {
-    // Arquivos grandes (> 5GB): 400 chunks, mínimo 50MB
-    targetChunks = 400;
-    minChunkSize = 50 * 1024 * 1024;
+    // Arquivos grandes (> 5GB): 300 chunks, mínimo 5MB
+    targetChunks = 300;
+    minChunkSize = 5 * 1024 * 1024;
   }
 
   const idealChunkSize = Math.floor(totalSize / targetChunks);
@@ -40,6 +43,51 @@ function calculateOptimalChunkSize(totalSize: number): number {
   return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
 }
 
+function calculateExponentialBackoff(retryCount: number): number {
+  // Backoff exponencial: 1s, 2s, 4s, 8s, 16s
+  const baseDelay = Math.min(1000 * Math.pow(2, retryCount), 16000);
+  // Adicionar jitter aleatório (0-30% do delay) para evitar thundering herd
+  const jitter = baseDelay * 0.3 * Math.random();
+  return baseDelay + jitter;
+}
+
+function calculateAdaptiveTimeout(
+  chunkSize: number,
+  uploadSpeed: number
+): number {
+  if (uploadSpeed <= 0) {
+    return MAX_TIMEOUT; // Se não temos velocidade, usar timeout máximo
+  }
+
+  // Calcular timeout baseado no tamanho do chunk e velocidade
+  // Multiplicar por 3 para dar margem de segurança
+  const estimatedTime = (chunkSize / uploadSpeed) * 3;
+  return Math.max(MIN_TIMEOUT, Math.min(MAX_TIMEOUT, estimatedTime));
+}
+
+function calculateAdaptiveParallelism(uploadSpeed: number): number {
+  // Começar com 1 chunk e aumentar gradualmente até 5 baseado na velocidade
+  // Velocidade em bytes por segundo
+  const mbps = uploadSpeed / (1024 * 1024); // Converter para MB/s
+
+  if (mbps < 0.5) {
+    // Conexão muito lenta: usar apenas 1 chunk
+    return 1;
+  } else if (mbps < 1) {
+    // Conexão lenta: usar 2 chunks
+    return 2;
+  } else if (mbps < 2) {
+    // Conexão média: usar 3 chunks
+    return 3;
+  } else if (mbps < 5) {
+    // Conexão boa: usar 4 chunks
+    return 4;
+  } else {
+    // Conexão rápida: usar 5 chunks (máximo)
+    return 5;
+  }
+}
+
 export interface ChunkInfo {
   index: number;
   start: number;
@@ -52,6 +100,7 @@ export interface ChunkStatus {
   status: "pending" | "uploading" | "completed" | "failed";
   retries: number;
   error?: string;
+  lastRetryTime?: number; // Timestamp da última tentativa de retry
 }
 
 export interface UploadProgress {
@@ -81,6 +130,10 @@ export class UploadChunker {
   private activeUploadBytes: Map<number, number>; // Track bytes uploaded for active chunks
   private initialTimeRemaining: number | null = null; // Fixed time estimate calculated once
   private chunkUploadStartTimes: Map<number, number>; // Track when each chunk started uploading
+  private currentParallelism: number = MIN_PARALLEL_CHUNKS; // Paralelismo atual (adaptativo)
+  private lastParallelismAdjust: number = 0; // Timestamp da última ajuste de paralelismo
+  private serverStatusCheckInterval?: NodeJS.Timeout; // Interval para verificar status do servidor
+  private lastUploadSpeed: number = 0; // Última velocidade de upload calculada
 
   constructor(file: File, backendUrl: string, chunkSize?: number) {
     this.file = file;
@@ -161,14 +214,11 @@ export class UploadChunker {
           chunksCompleted++;
         }
       } else if (includeActiveUploads && status.status === "uploading") {
-        // Estimate progress for currently uploading chunks
+        // Use real progress for currently uploading chunks
         const activeBytes = this.activeUploadBytes.get(status.index) || 0;
         const chunk = this.chunks[status.index];
         if (chunk) {
-          // Use a conservative estimate: assume 50% of chunk is uploaded if we don't have exact data
-          const estimatedBytes =
-            activeBytes > 0 ? activeBytes : chunk.size * 0.5;
-          uploadedBytes += Math.min(estimatedBytes, chunk.size);
+          uploadedBytes += Math.min(activeBytes, chunk.size);
         }
       }
     }
@@ -190,8 +240,24 @@ export class UploadChunker {
 
       // Exponential moving average with alpha = 0.3
       uploadSpeed = previousSpeed * 0.7 + currentSpeed * 0.3;
+      this.lastUploadSpeed = uploadSpeed;
     } else if (timeElapsed > 0) {
       uploadSpeed = uploadedBytes / timeElapsed;
+      this.lastUploadSpeed = uploadSpeed;
+    } else {
+      uploadSpeed = this.lastUploadSpeed;
+    }
+
+    // Ajustar paralelismo baseado na velocidade
+    if (now - this.lastParallelismAdjust > PARALLELISM_ADJUST_INTERVAL) {
+      const newParallelism = calculateAdaptiveParallelism(uploadSpeed);
+      if (newParallelism !== this.currentParallelism) {
+        this.currentParallelism = Math.max(
+          MIN_PARALLEL_CHUNKS,
+          Math.min(MAX_PARALLEL_CHUNKS, newParallelism)
+        );
+        this.lastParallelismAdjust = now;
+      }
     }
 
     // Calculate initial time remaining only once when we have a reliable speed estimate
@@ -226,6 +292,38 @@ export class UploadChunker {
     this.onProgress(progress);
   }
 
+  private async checkServerStatus(): Promise<void> {
+    if (!this.uploadId) return;
+
+    try {
+      const response = await fetch(
+        `${this.backendUrl}/upload/status/${this.uploadId}`
+      );
+      if (!response.ok) return;
+
+      const result = await response.json();
+      if (result.success && result.receivedChunks) {
+        // Sincronizar chunks recebidos pelo servidor
+        const serverReceivedChunks = new Set(result.receivedChunks || []);
+        for (const [index, status] of this.chunkStatuses.entries()) {
+          // Se o servidor já recebeu o chunk mas localmente está como pending/failed,
+          // marcar como completed
+          if (
+            serverReceivedChunks.has(index) &&
+            (status.status === "pending" || status.status === "failed")
+          ) {
+            status.status = "completed";
+            this.chunkUploadStartTimes.delete(index);
+            this.activeUploadBytes.delete(index);
+          }
+        }
+      }
+    } catch (error) {
+      // Ignorar erros de verificação de status (não crítico)
+      console.debug("Server status check failed:", error);
+    }
+  }
+
   private async uploadChunk(chunk: ChunkInfo): Promise<boolean> {
     const status = this.chunkStatuses.get(chunk.index);
     if (!status) return false;
@@ -234,9 +332,24 @@ export class UploadChunker {
       return true;
     }
 
+    // Verificar se precisa esperar pelo backoff antes de tentar novamente
+    if (
+      status.status === "failed" &&
+      status.lastRetryTime &&
+      status.retries > 0
+    ) {
+      const backoffDelay = calculateExponentialBackoff(status.retries - 1);
+      const timeSinceLastRetry = Date.now() - status.lastRetryTime;
+      if (timeSinceLastRetry < backoffDelay) {
+        // Ainda não passou tempo suficiente do backoff
+        return false;
+      }
+    }
+
     status.status = "uploading";
     const uploadStartTime = Date.now();
     this.chunkUploadStartTimes.set(chunk.index, uploadStartTime);
+    this.activeUploadBytes.set(chunk.index, 0); // Reset progress tracking
     this.updateProgress();
 
     const blob = this.getChunkBlob(chunk);
@@ -245,32 +358,94 @@ export class UploadChunker {
     formData.append("chunkIndex", chunk.index.toString());
     formData.append("chunk", blob);
 
+    // Calcular timeout adaptativo baseado na velocidade atual
+    const adaptiveTimeout = calculateAdaptiveTimeout(
+      chunk.size,
+      this.lastUploadSpeed
+    );
+
     const controller = new AbortController();
     this.abortControllers.set(chunk.index, controller);
 
-    // Set up timeout
+    // Set up timeout adaptativo
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, CHUNK_UPLOAD_TIMEOUT);
+    }, adaptiveTimeout);
 
     try {
-      const response = await fetch(`${this.backendUrl}/upload/chunk`, {
-        method: "POST",
-        body: formData,
-        signal: controller.signal,
-      });
+      // Usar XMLHttpRequest para rastrear progresso real
+      const xhr = new XMLHttpRequest();
+      const uploadPromise = new Promise<{ success: boolean; error?: string }>(
+        (resolve) => {
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              // Atualizar bytes enviados em tempo real
+              this.activeUploadBytes.set(chunk.index, event.loaded);
+              this.updateProgress(true);
+            }
+          };
 
-      clearTimeout(timeoutId);
+          xhr.onload = () => {
+            clearTimeout(timeoutId);
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const result = JSON.parse(xhr.responseText);
+                if (result.success) {
+                  resolve({ success: true });
+                } else {
+                  resolve({
+                    success: false,
+                    error: result.error || "Chunk upload failed",
+                  });
+                }
+              } catch {
+                resolve({ success: false, error: "Invalid response" });
+              }
+            } else {
+              resolve({
+                success: false,
+                error: `HTTP error! status: ${xhr.status}`,
+              });
+            }
+          };
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+          xhr.onerror = () => {
+            clearTimeout(timeoutId);
+            resolve({
+              success: false,
+              error: "Network error during upload",
+            });
+          };
 
-      const result = await response.json();
+          xhr.onabort = () => {
+            clearTimeout(timeoutId);
+            resolve({
+              success: false,
+              error: "Upload timeout or cancelled",
+            });
+          };
+
+          xhr.open("POST", `${this.backendUrl}/upload/chunk`);
+          xhr.send(formData);
+        }
+      );
+
+      // Aguardar upload ou timeout
+      const timeoutPromise = new Promise<{ success: boolean; error: string }>(
+        (resolve) => {
+          controller.signal.addEventListener("abort", () => {
+            resolve({ success: false, error: "Upload timeout" });
+          });
+        }
+      );
+
+      const result = await Promise.race([uploadPromise, timeoutPromise]);
 
       if (result.success) {
         status.status = "completed";
+        status.retries = 0; // Reset retries on success
         this.chunkUploadStartTimes.delete(chunk.index);
+        this.activeUploadBytes.delete(chunk.index);
         this.updateProgress();
         return true;
       } else {
@@ -283,7 +458,9 @@ export class UploadChunker {
       if (error instanceof Error && error.name === "AbortError") {
         status.status = "pending";
         status.error = "Upload timeout or cancelled";
+        status.lastRetryTime = Date.now();
         this.chunkUploadStartTimes.delete(chunk.index);
+        this.activeUploadBytes.delete(chunk.index);
         return false;
       }
 
@@ -295,7 +472,8 @@ export class UploadChunker {
             error.message.includes("network") ||
             error.message.includes("Failed to fetch") ||
             error.message.includes("ECONNRESET") ||
-            error.message.includes("aborted")));
+            error.message.includes("aborted") ||
+            error.message.includes("timeout")));
 
       if (isNetworkError) {
         status.error =
@@ -303,12 +481,15 @@ export class UploadChunker {
             ? error.message
             : "Network error during upload";
         status.status = "failed";
+        status.lastRetryTime = Date.now();
       } else {
         status.error = error instanceof Error ? error.message : "Unknown error";
         status.status = "failed";
+        status.lastRetryTime = Date.now();
       }
 
       this.chunkUploadStartTimes.delete(chunk.index);
+      this.activeUploadBytes.delete(chunk.index);
       this.updateProgress();
       return false;
     } finally {
@@ -324,6 +505,15 @@ export class UploadChunker {
 
     for (const [index, status] of this.chunkStatuses.entries()) {
       if (status.status === "pending" || status.status === "failed") {
+        // Verificar se pode tentar novamente (backoff)
+        if (status.status === "failed" && status.lastRetryTime) {
+          const backoffDelay = calculateExponentialBackoff(status.retries);
+          const timeSinceLastRetry = Date.now() - status.lastRetryTime;
+          if (timeSinceLastRetry < backoffDelay) {
+            // Ainda não passou tempo suficiente do backoff, pular este chunk por agora
+            continue;
+          }
+        }
         pending.push(index);
       }
     }
@@ -349,7 +539,25 @@ export class UploadChunker {
       if (status.status === "uploading") {
         const startTime = this.chunkUploadStartTimes.get(index);
         if (startTime && now - startTime > STUCK_CHUNK_THRESHOLD) {
-          stuckChunks.push(index);
+          // Verificar se há progresso real
+          const activeBytes = this.activeUploadBytes.get(index) || 0;
+          const chunk = this.chunks[index];
+          const expectedProgress = chunk
+            ? (now - startTime) /
+              calculateAdaptiveTimeout(chunk.size, this.lastUploadSpeed)
+            : 0;
+
+          // Se não há progresso significativo, considerar travado
+          if (
+            chunk &&
+            activeBytes < chunk.size * 0.1 &&
+            expectedProgress > 0.5
+          ) {
+            stuckChunks.push(index);
+          } else if (now - startTime > STUCK_CHUNK_THRESHOLD * 1.5) {
+            // Se passou muito tempo mesmo com algum progresso, considerar travado
+            stuckChunks.push(index);
+          }
         }
       }
     }
@@ -368,7 +576,9 @@ export class UploadChunker {
         // Reset status
         status.status = "pending";
         status.error = "Chunk stuck in uploading state, reset for retry";
+        status.lastRetryTime = Date.now();
         this.chunkUploadStartTimes.delete(chunkIndex);
+        this.activeUploadBytes.delete(chunkIndex);
       }
     }
   }
@@ -381,6 +591,9 @@ export class UploadChunker {
     // Start periodic progress updates for smoother feedback
     this.startProgressInterval();
 
+    // Start periodic server status checks
+    this.startServerStatusCheck();
+
     try {
       while (true) {
         const pending = this.getPendingChunks();
@@ -389,7 +602,7 @@ export class UploadChunker {
         }
 
         const active = this.getActiveUploads();
-        const slotsAvailable = MAX_PARALLEL_CHUNKS - active;
+        const slotsAvailable = this.currentParallelism - active;
 
         if (slotsAvailable <= 0) {
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -431,6 +644,7 @@ export class UploadChunker {
     } finally {
       // Stop periodic progress updates
       this.stopProgressInterval();
+      this.stopServerStatusCheck();
     }
   }
 
@@ -448,8 +662,23 @@ export class UploadChunker {
     }
   }
 
+  private startServerStatusCheck(): void {
+    // Check server status periodically to sync chunks
+    this.serverStatusCheckInterval = setInterval(() => {
+      this.checkServerStatus();
+    }, SERVER_STATUS_CHECK_INTERVAL);
+  }
+
+  private stopServerStatusCheck(): void {
+    if (this.serverStatusCheckInterval) {
+      clearInterval(this.serverStatusCheckInterval);
+      this.serverStatusCheckInterval = undefined;
+    }
+  }
+
   cancel(): void {
     this.stopProgressInterval();
+    this.stopServerStatusCheck();
     for (const controller of this.abortControllers.values()) {
       controller.abort();
     }
