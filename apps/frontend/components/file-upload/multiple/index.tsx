@@ -221,15 +221,76 @@ export function MultipleUpload({
         }));
 
         // Complete upload
-        const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ uploadId }),
-        });
+        let completeResult: any;
+        try {
+          const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ uploadId }),
+          });
 
-        const completeResult = await completeResponse.json();
+          completeResult = await completeResponse.json();
+        } catch (error: any) {
+          // Se receber erro 524 (timeout do gateway), verificar status do servidor
+          if (error.message?.includes("524") || error.message?.includes("timeout")) {
+            console.log("Gateway timeout (524), checking server status...");
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            
+            const statusResponse = await fetch(
+              `${BACKEND_URL}/upload/status/${uploadId}`
+            );
+            if (statusResponse.ok) {
+              const statusResult = await statusResponse.json();
+              if (statusResult.success && statusResult.isComplete) {
+                completeResult = {
+                  success: true,
+                  path: statusResult.finalPath,
+                  processing: statusResult.processing,
+                };
+              } else {
+                throw new Error("Upload not complete on server");
+              }
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        }
+
+        // Se está processando, aguardar processamento completar
+        if (completeResult.processing) {
+          let attempts = 0;
+          const maxAttempts = 30;
+          
+          while (completeResult.processing && attempts < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            
+            const statusResponse = await fetch(
+              `${BACKEND_URL}/upload/status/${uploadId}`
+            );
+            if (statusResponse.ok) {
+              const statusResult = await statusResponse.json();
+              if (statusResult.success) {
+                if (statusResult.finalPath) {
+                  completeResult.path = statusResult.finalPath;
+                  completeResult.processing = false;
+                  break;
+                }
+                if (statusResult.processingError) {
+                  throw new Error(statusResult.processingError);
+                }
+              }
+            }
+            attempts++;
+          }
+          
+          if (completeResult.processing) {
+            throw new Error("Processing timeout - file may still be processing");
+          }
+        }
 
         if (!completeResult.success) {
           throw new Error(completeResult.error || "Failed to complete upload");
@@ -254,7 +315,7 @@ export function MultipleUpload({
                   ...f,
                   status: "completed" as const,
                   progress: 100,
-                  finalFilePath: completeResult.filePath || finalFilePath,
+                  finalFilePath: completeResult.path || finalFilePath,
                   uploadId: uploadId,
                 }
               : f

@@ -13,6 +13,9 @@ export interface UploadSession {
   tempFilePath: string;
   createdAt: number;
   lastActivity: number;
+  processing?: boolean; // Indica se está processando a conclusão
+  finalPath?: string; // Caminho final do arquivo após processamento
+  processingError?: string; // Erro durante processamento
 }
 
 const SESSION_TTL = 48 * 60 * 60 * 1000; // 48 hours (aumentado de 24h)
@@ -135,6 +138,9 @@ class UploadManager {
       fileSize: existsSync(session.tempFilePath)
         ? statSync(session.tempFilePath).size
         : 0,
+      processing: session.processing || false,
+      finalPath: session.finalPath,
+      processingError: session.processingError,
     };
   }
 

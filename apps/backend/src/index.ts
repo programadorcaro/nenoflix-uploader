@@ -523,103 +523,149 @@ const app = new Elysia({ adapter: node() })
         };
       }
 
-      const { targetDir, targetPath } = buildTargetPath(
-        session.destinationPath,
-        session.folderName,
-        session.fileName
-      );
-
-      await ensureDirectoryExists(targetDir);
-
-      const tmpBasePath = resolve(process.cwd(), DEFAULT_TMP_DIR);
-      const isDestinationTmp = session.destinationPath === tmpBasePath;
-
-      // Validate integrity before moving
-      const integrity = await validateFileIntegrity(session);
-      if (!integrity.valid) {
-        console.error(
-          `File integrity check failed. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`
-        );
+      // Se já está processando, retornar status atual
+      if (session.processing) {
+        const status = uploadManager.getSessionStatus(uploadId);
         return {
-          success: false,
-          error: `File size mismatch. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`,
+          success: status?.finalPath ? true : false,
+          message: status?.finalPath
+            ? "File processing completed"
+            : "File is being processed",
+          path: status?.finalPath,
+          filePath: status?.finalPath, // Manter compatibilidade
+          processing: true,
+          error: status?.processingError,
         };
       }
 
-      // If destination is tmp and paths match, no need to move
-      if (isDestinationTmp && session.tempFilePath === targetPath) {
-        // File is already in the right place
-      } else {
-        // Use streaming copy for large files instead of move
-        // This is more reliable for cross-device scenarios
+      // Se já foi processado, retornar resultado
+      if (session.finalPath) {
+        return {
+          success: true,
+          message: "File uploaded successfully",
+          path: session.finalPath,
+          filePath: session.finalPath, // Manter compatibilidade
+        };
+      }
+
+      // Marcar como processando e iniciar processamento em background
+      session.processing = true;
+
+      // Retornar imediatamente para evitar timeout do gateway
+      // Processar em background
+      (async () => {
         try {
-          const { createReadStream } = await import("fs");
-          const { pipeline } = await import("stream/promises");
-          const readStream = createReadStream(session.tempFilePath);
-          const writeStream = createWriteStream(targetPath);
+          const { targetDir, targetPath } = buildTargetPath(
+            session.destinationPath,
+            session.folderName,
+            session.fileName
+          );
 
-          await pipeline(readStream, writeStream);
+          await ensureDirectoryExists(targetDir);
 
-          // Delete temp file after successful copy
-          await unlink(session.tempFilePath).catch(() => {
-            // Ignore if already deleted
-          });
+          const tmpBasePath = resolve(process.cwd(), DEFAULT_TMP_DIR);
+          const isDestinationTmp = session.destinationPath === tmpBasePath;
+
+          // Validate integrity before moving
+          const integrity = await validateFileIntegrity(session);
+          if (!integrity.valid) {
+            console.error(
+              `File integrity check failed. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`
+            );
+            session.processingError = `File size mismatch. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`;
+            session.processing = false;
+            return;
+          }
+
+          // If destination is tmp and paths match, no need to move
+          if (isDestinationTmp && session.tempFilePath === targetPath) {
+            // File is already in the right place
+            session.finalPath = targetPath;
+          } else {
+            // Use streaming copy for large files instead of move
+            // This is more reliable for cross-device scenarios
+            try {
+              const { createReadStream } = await import("fs");
+              const { pipeline } = await import("stream/promises");
+              const readStream = createReadStream(session.tempFilePath);
+              const writeStream = createWriteStream(targetPath);
+
+              await pipeline(readStream, writeStream);
+
+              session.finalPath = targetPath;
+
+              // Delete temp file after successful copy
+              await unlink(session.tempFilePath).catch(() => {
+                // Ignore if already deleted
+              });
+            } catch (error: any) {
+              console.error(
+                "Streaming copy failed, falling back to move:",
+                error
+              );
+              // Fallback to moveFile if copy fails
+              if (error.code !== "ENOENT") {
+                await moveFile(session.tempFilePath, targetPath);
+                session.finalPath = targetPath;
+              } else {
+                throw error;
+              }
+            }
+          }
+
+          // Always clean up temp file if it still exists (in case of errors or edge cases)
+          try {
+            if (existsSync(session.tempFilePath)) {
+              await unlink(session.tempFilePath).catch(() => {
+                // Ignore if already deleted
+              });
+            }
+          } catch {
+            // Ignore cleanup errors
+          }
+
+          // Clean up temp directory if empty (only for this user's upload)
+          try {
+            const tempDir = dirname(session.tempFilePath);
+            if (existsSync(tempDir) && tempDir !== tmpBasePath) {
+              const entries = await readdir(tempDir);
+              if (entries.length === 0) {
+                const { rmdir } = await import("fs/promises");
+                await rmdir(tempDir).catch(() => {
+                  // Ignore if directory not empty or other error
+                });
+              }
+            }
+
+            // Also try to remove base tmp directory if empty (only if no other uploads)
+            if (existsSync(tmpBasePath)) {
+              const baseEntries = await readdir(tmpBasePath);
+              if (baseEntries.length === 0) {
+                const { rmdir } = await import("fs/promises");
+                await rmdir(tmpBasePath).catch(() => {
+                  // Ignore if directory not empty or other error
+                });
+              }
+            }
+          } catch {
+            // Ignore cleanup errors
+          }
+
+          session.processing = false;
         } catch (error: any) {
-          console.error("Streaming copy failed, falling back to move:", error);
-          // Fallback to moveFile if copy fails
-          if (error.code !== "ENOENT") {
-            await moveFile(session.tempFilePath, targetPath);
-          }
+          console.error("Error processing upload completion:", error);
+          session.processingError =
+            error instanceof Error ? error.message : "Unknown error";
+          session.processing = false;
         }
-      }
+      })();
 
-      // Always clean up temp file if it still exists (in case of errors or edge cases)
-      try {
-        if (existsSync(session.tempFilePath)) {
-          await unlink(session.tempFilePath).catch(() => {
-            // Ignore if already deleted
-          });
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
-
-      // Clean up temp directory if empty (only for this user's upload)
-      try {
-        const tempDir = dirname(session.tempFilePath);
-        if (existsSync(tempDir) && tempDir !== tmpBasePath) {
-          const entries = await readdir(tempDir);
-          if (entries.length === 0) {
-            const { rmdir } = await import("fs/promises");
-            await rmdir(tempDir).catch(() => {
-              // Ignore if directory not empty or other error
-            });
-          }
-        }
-
-        // Also try to remove base tmp directory if empty (only if no other uploads)
-        if (existsSync(tmpBasePath)) {
-          const baseEntries = await readdir(tmpBasePath);
-          if (baseEntries.length === 0) {
-            const { rmdir } = await import("fs/promises");
-            await rmdir(tmpBasePath).catch(() => {
-              // Ignore if directory not empty or other error
-            });
-          }
-        }
-      } catch {
-        // Ignore cleanup errors
-      }
-
-      uploadManager.deleteSession(uploadId);
-
-      // Delay de 10 segundos para aliviar stress do HD antes do próximo upload
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-
+      // Retornar imediatamente
       return {
         success: true,
-        message: "File uploaded successfully",
-        path: targetPath,
+        message: "Upload complete, processing file...",
+        processing: true,
+        path: undefined, // Será preenchido quando processamento completar
       };
     } catch (error) {
       console.error("Upload complete error:", error);
