@@ -1,8 +1,8 @@
 const MAX_CHUNK_SIZE = 200 * 1024 * 1024; // 200MB maximum (permite chunks maiores para arquivos grandes)
 const MAX_PARALLEL_CHUNKS = 5; // Limite de uploads simultâneos para estabilidade do sistema
 const MAX_RETRIES = 3;
-const CHUNK_UPLOAD_TIMEOUT = 3 * 60 * 1000; // 3 minutos por chunk (reduzido de 5)
-const STUCK_CHUNK_THRESHOLD = 10 * 60 * 1000; // 10 minutos para considerar chunk preso
+const CHUNK_UPLOAD_TIMEOUT = 5 * 60 * 1000; // 5 minutos por chunk
+const STUCK_CHUNK_THRESHOLD = 6 * 60 * 1000; // 6 minutos para considerar chunk preso (timeout é 5min)
 
 function calculateOptimalChunkSize(totalSize: number): number {
   // Configuração adaptativa baseada no tamanho do arquivo
