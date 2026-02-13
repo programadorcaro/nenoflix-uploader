@@ -9,6 +9,7 @@ import type { MultipleFileItem, MultipleUploadState } from "./types";
 import { BACKEND_URL } from "../constants";
 import { UploadChunker } from "@/lib/upload-chunker";
 import { UploadStateManager } from "@/lib/upload-state";
+import { extractEpisodeInfo } from "../utils/name-suggestion";
 
 interface MultipleUploadProps {
   folderName: string;
@@ -107,12 +108,13 @@ export function MultipleUpload({
   const handleStartUpload = async () => {
     if (!canStartUpload) return;
 
-    // Captura a lista de arquivos atual antes de iniciar
-    const filesToUpload = [...state.files];
+    // Captura a lista e ordena por SXXEXX (primeiros episódios primeiro)
+    const filesToUpload = sortFilesByEpisodeOrder([...state.files]);
 
-    // Atualiza estado e muda para step de upload
+    // Atualiza estado e muda para step de upload (lista já ordenada)
     setState((prev) => ({
       ...prev,
+      files: filesToUpload,
       isUploading: true,
       currentUploadIndex: 0,
       error: null,
@@ -465,4 +467,25 @@ export function MultipleUpload({
       )}
     </div>
   );
+}
+
+function sortFilesByEpisodeOrder(items: MultipleFileItem[]): MultipleFileItem[] {
+  function getSortKey(item: MultipleFileItem): [number, number] {
+    let info = extractEpisodeInfo(item.originalFileName);
+    if (info.season === null || info.episode === null) {
+      info = extractEpisodeInfo(item.fileName);
+    }
+    return [info.season ?? Infinity, info.episode ?? Infinity];
+  }
+
+  return [...items]
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const [sA, eA] = getSortKey(a.item);
+      const [sB, eB] = getSortKey(b.item);
+      if (sA !== sB) return sA - sB;
+      if (eA !== eB) return eA - eB;
+      return a.index - b.index;
+    })
+    .map(({ item }) => item);
 }
