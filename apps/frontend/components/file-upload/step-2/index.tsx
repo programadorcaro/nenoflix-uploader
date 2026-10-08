@@ -3,6 +3,7 @@
 import * as React from "react";
 import { extractFileName } from "../utils/format";
 import { Button } from "@/components/ui/button";
+import { StepActions } from "../step-actions";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { FileDropZone } from "./file-drop-zone";
@@ -70,99 +71,55 @@ export function Step2({
   }, [data.selectedFile, data.fileName]);
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      <Field>
-        <FieldLabel className="text-base font-semibold mb-3">
-          Selecionar Arquivo
-        </FieldLabel>
-        <FileDropZone
-          file={data.selectedFile}
-          onFileSelect={handleFileSelect}
-          onFileRemove={handleFileRemove}
-          disabled={isUploading}
-        />
-      </Field>
+    <div className="flex flex-1 flex-col gap-5 sm:gap-6">
+      <FileDropZone
+        file={data.selectedFile}
+        onFileSelect={handleFileSelect}
+        onFileRemove={handleFileRemove}
+        disabled={isUploading}
+      />
 
       {data.selectedFile && (
         <Field>
-          <div className="flex items-center gap-2 mb-3">
-            <FieldLabel
-              htmlFor="file-name-step2"
-              className="text-base font-semibold"
-            >
-              Nome do Arquivo <span className="text-destructive">*</span>
-            </FieldLabel>
-            {showSuggestion && suggestedName && (
-              <div className="group relative">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="w-4 h-4 text-muted-foreground cursor-help"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                  <path d="M12 17h.01" />
-                </svg>
-                <div className="absolute left-0 top-6 z-10 hidden group-hover:block w-64 p-2 bg-popover border border-border rounded-md shadow-md text-xs text-popover-foreground">
-                  <p className="font-semibold mb-1">Sugestão:</p>
-                  <p className="text-muted-foreground">{suggestedName}</p>
-                </div>
-              </div>
-            )}
-            {showSuggestion && (
+          <FieldLabel htmlFor="file-name-step2" className="text-sm font-semibold sm:text-base">
+            Nome do arquivo no servidor
+          </FieldLabel>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              id="file-name-step2"
+              placeholder="Digite o nome do arquivo"
+              value={data.fileName}
+              onChange={(e) => handleFileNameChange(e.target.value)}
+              disabled={isUploading}
+              required
+              className="h-11 text-base sm:flex-1"
+            />
+            {showSuggestion && suggestedName && suggestedName !== data.fileName && (
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
                 onClick={handleApplySuggestion}
                 disabled={isUploading}
-                className="text-xs ml-auto"
+                className="h-11 shrink-0"
               >
-                Aplicar sugestão
+                Usar sugestão
               </Button>
             )}
           </div>
-          <Input
-            id="file-name-step2"
-            placeholder="Digite o nome do arquivo"
-            value={data.fileName}
-            onChange={(e) => handleFileNameChange(e.target.value)}
-            disabled={isUploading}
-            required
-            className="text-base"
-          />
-          <p className="text-xs text-muted-foreground mt-2">
-            O nome do arquivo será usado para salvar no servidor
-          </p>
+          {showSuggestion && suggestedName && suggestedName !== data.fileName ? (
+            <p className="truncate text-xs text-muted-foreground">
+              Sugestão: <span className="text-foreground">{suggestedName}</span>
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">A extensão é mantida automaticamente.</p>
+          )}
         </Field>
       )}
 
-      <Field orientation="horizontal" className="gap-3 pt-4">
-        <Button
-          onClick={onBack}
-          disabled={isUploading}
-          type="button"
-          variant="outline"
-          className="flex-1 sm:flex-initial sm:min-w-[120px]"
-          size="lg"
-        >
-          Voltar
-        </Button>
-        <Button
-          onClick={onNext}
-          disabled={isUploading || !isFormValid}
-          type="button"
-          className="flex-1 sm:flex-initial sm:min-w-[200px] sm:ml-auto"
-          size="lg"
-        >
-          Enviar
-        </Button>
-      </Field>
+      <StepActions
+        back={{ onClick: onBack, disabled: isUploading }}
+        primary={{ label: "Enviar", onClick: onNext, disabled: isUploading || !isFormValid }}
+      />
     </div>
   );
 }

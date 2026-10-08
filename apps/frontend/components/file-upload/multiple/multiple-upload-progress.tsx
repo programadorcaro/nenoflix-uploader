@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import Image from "next/image";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -14,257 +13,112 @@ interface MultipleUploadProgressProps {
   onReset: () => void;
 }
 
-export function MultipleUploadProgress({
-  files,
-  currentUploadIndex,
-  contentType,
-  onReset,
-}: MultipleUploadProgressProps) {
-  const completedCount = files.filter((f) => f.status === "completed").length;
-  const errorCount = files.filter((f) => f.status === "error").length;
-  const allCompleted = files.every(
-    (f) => f.status === "completed" || f.status === "error"
+const plural = (n: number, word: string) => `${n} ${word}${n !== 1 ? "s" : ""}`;
+
+function StatusMark({ status }: { status: MultipleFileItem["status"] }) {
+  if (status === "completed") return <span className="text-primary" aria-label="Concluído">✓</span>;
+  if (status === "error") return <span className="text-destructive" aria-label="Erro">✕</span>;
+  if (status === "pending") return <span className="text-muted-foreground" aria-label="Aguardando">•</span>;
+  return <span className="inline-block size-3 animate-pulse rounded-full bg-primary" aria-label="Enviando" />;
+}
+
+export function MultipleUploadProgress({ files, currentUploadIndex, contentType, onReset }: MultipleUploadProgressProps) {
+  const completed = files.filter((f) => f.status === "completed").length;
+  const errors = files.filter((f) => f.status === "error").length;
+  const finished = completed + errors === files.length;
+  const current = files[currentUploadIndex];
+
+  // Overall progress weighted by size, so one big file doesn't jump the bar.
+  const totalBytes = files.reduce((n, f) => n + f.file.size, 0) || 1;
+  const sentBytes = files.reduce(
+    (n, f) => n + (f.status === "completed" ? f.file.size : f.status === "error" ? 0 : (f.file.size * f.progress) / 100),
+    0
+  );
+  const overall = finished ? 100 : (sentBytes / totalBytes) * 100;
+
+  const list = (
+    <ul className="divide-y divide-border rounded-xl border border-border bg-card">
+      {files.map((f) => {
+        const active = f.status === "uploading" || f.status === "completing";
+        return (
+          <li key={f.id} className={`px-4 py-3 ${active ? "bg-primary/5" : ""}`}>
+            <div className="flex items-center gap-3">
+              <span className="w-4 shrink-0 text-center text-sm">
+                <StatusMark status={f.status} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium" title={f.fileName}>
+                  {f.fileName}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {f.status === "completed" && f.finalFilePath
+                    ? mediaLocation(f.finalFilePath, contentType, contentType === "movies")
+                    : f.status === "error"
+                      ? f.error
+                      : formatFileSize(f.file.size)}
+                </p>
+              </div>
+              {active && (
+                <span className="shrink-0 text-xs font-semibold tabular-nums text-primary">
+                  {f.status === "completing" ? "Finalizando" : `${Math.round(f.progress)}%`}
+                </span>
+              )}
+            </div>
+            {active && <Progress value={f.status === "completing" ? 100 : f.progress} className="mt-2 h-1.5" />}
+          </li>
+        );
+      })}
+    </ul>
   );
 
-  if (allCompleted) {
-    const allSuccess = errorCount === 0;
+  if (finished) {
+    const ok = errors === 0;
     return (
-      <div className="space-y-6 relative">
-        <div className="text-center py-8 sm:py-12">
-          <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
-            <div className="relative w-full max-w-32 aspect-square mx-auto">
-              <Image
-                src={allSuccess ? "/sucess.jpg" : "/error.jpg"}
-                alt={allSuccess ? "Sucesso" : "Erro"}
-                width={400}
-                height={300}
-                className="w-full h-auto object-cover rounded-2xl shadow-2xl"
-                priority
-              />
-              <div
-                className={`absolute inset-0 ${
-                  allSuccess ? "bg-primary/10" : "bg-destructive/10"
-                } rounded-2xl blur-xl -z-10`}
-              />
-            </div>
-          </div>
-          <div className="space-y-6 max-w-2xl mx-auto">
-            <div className="space-y-3">
-              <h3 className="text-2xl sm:text-3xl font-bold text-primary">
-                {allSuccess
-                  ? "Todos os uploads concluídos!"
-                  : "Upload finalizado com erros"}
-              </h3>
-              <p className="text-sm sm:text-base text-muted-foreground">
-                {allSuccess
-                  ? `${completedCount} arquivo${completedCount !== 1 ? "s" : ""} enviado${completedCount !== 1 ? "s" : ""} com sucesso.`
-                  : `${completedCount} arquivo${completedCount !== 1 ? "s" : ""} enviado${completedCount !== 1 ? "s" : ""} com sucesso, ${errorCount} com erro.`}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-              <h4 className="text-base font-semibold mb-4">
-                Resumo dos arquivos
-              </h4>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {files.map((fileItem) => (
-                  <div
-                    key={fileItem.id}
-                    className={`p-3 rounded-lg border ${
-                      fileItem.status === "completed"
-                        ? "border-primary/20 bg-primary/5"
-                        : "border-destructive/20 bg-destructive/5"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground">
-                          {fileItem.fileName}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {fileItem.originalFileName}
-                        </p>
-                        {fileItem.finalFilePath && (
-                          <p className="text-xs font-mono text-muted-foreground mt-1 break-all">
-                            {mediaLocation(
-                              fileItem.finalFilePath,
-                              contentType,
-                              contentType === "movies"
-                            )}
-                          </p>
-                        )}
-                      </div>
-                      <div className="shrink-0">
-                        {fileItem.status === "completed" ? (
-                          <span className="text-xs font-semibold text-primary">
-                            ✓ Concluído
-                          </span>
-                        ) : (
-                          <span className="text-xs font-semibold text-destructive">
-                            ✗ Erro
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {fileItem.error && (
-                      <p className="text-xs text-destructive mt-2">
-                        {fileItem.error}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <Button
-              onClick={onReset}
-              type="button"
-              className="w-full sm:w-auto sm:min-w-[200px]"
-              size="lg"
-            >
-              Concluir
-            </Button>
+      <div className="flex flex-col gap-5 pb-4 sm:gap-6 sm:pb-0">
+        <div className="flex items-center gap-4 sm:flex-col sm:text-center">
+          <Image
+            src={ok ? "/sucess.jpg" : "/error.jpg"}
+            alt={ok ? "Upload concluído" : "Upload com erros"}
+            width={400}
+            height={300}
+            className="size-16 shrink-0 rounded-xl object-cover shadow-lg sm:size-28 sm:rounded-2xl"
+            priority
+          />
+          <div>
+            <h3 className={`text-xl font-bold sm:text-3xl ${ok ? "text-primary" : "text-destructive"}`}>
+              {ok ? "Todos os uploads concluídos!" : "Upload finalizado com erros"}
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {ok
+                ? `${plural(completed, "arquivo")} enviado${completed !== 1 ? "s" : ""}.`
+                : `${completed} enviado${completed !== 1 ? "s" : ""}, ${errors} com erro.`}
+            </p>
           </div>
         </div>
+        {list}
+        <Button type="button" onClick={onReset} className="h-12 w-full text-base font-semibold sm:mx-auto sm:h-11 sm:w-auto sm:min-w-48">
+          Concluir
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 sm:space-y-8">
-      {/* Progresso geral */}
-      <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg sm:text-xl font-semibold">
-            Upload em progresso
+    <div className="flex flex-col gap-4 pb-4 sm:pb-0">
+      <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="text-base font-semibold sm:text-lg">
+            Enviando {Math.min(currentUploadIndex + 1, files.length)} de {files.length}
           </h3>
-          <p className="text-sm text-muted-foreground">
-            {completedCount} de {files.length} concluído
-            {completedCount !== files.length ? "s" : ""}
-          </p>
+          <span className="text-2xl font-bold tabular-nums text-primary">{Math.round(overall)}%</span>
         </div>
-        <Progress
-          value={(completedCount / files.length) * 100}
-          className="h-3"
-        />
+        <Progress value={overall} className="mt-3 h-2.5" />
+        <p className="mt-2 text-xs text-muted-foreground tabular-nums">
+          {current?.uploadSpeed ? `${(current.uploadSpeed / 1048576).toFixed(1)} MB/s` : "Calculando velocidade..."}
+          {current?.timeElapsed !== undefined && ` · ${formatTime(current.timeElapsed)} neste arquivo`}
+        </p>
       </div>
-
-      {/* Lista de arquivos */}
-      <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-        <h4 className="text-base font-semibold mb-4">Lista de arquivos</h4>
-        <div className="space-y-2 max-h-96 overflow-y-auto">
-          {files.map((fileItem, index) => {
-            const isCurrent = index === currentUploadIndex;
-            const isCompleted = fileItem.status === "completed";
-            const isError = fileItem.status === "error";
-            const isUploading =
-              fileItem.status === "uploading" ||
-              fileItem.status === "completing";
-            const isPending = fileItem.status === "pending" && !isCurrent;
-
-            return (
-              <div
-                key={fileItem.id}
-                className={`p-4 rounded-lg border ${
-                  isCurrent && isUploading
-                    ? "border-2 border-primary bg-primary/5"
-                    : isCompleted
-                      ? "border-primary/20 bg-primary/5"
-                      : isError
-                        ? "border-destructive/20 bg-destructive/5"
-                        : "border-border bg-muted/30"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-semibold text-muted-foreground">
-                        #{index + 1}
-                      </span>
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {fileItem.fileName}
-                      </p>
-                      {isCurrent && isUploading && (
-                        <span className="text-xs font-semibold text-primary">
-                          {fileItem.status === "completing"
-                            ? "Finalizando..."
-                            : "Enviando..."}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {fileItem.originalFileName}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formatFileSize(fileItem.file.size)}
-                    </p>
-                    {isCurrent && isUploading && (
-                      <div className="mt-3 space-y-2">
-                        <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs text-muted-foreground">
-                              Progresso
-                            </span>
-                            <span className="text-xs font-semibold text-foreground">
-                              {fileItem.status === "completing"
-                                ? "100%"
-                                : `${Math.round(fileItem.progress)}%`}
-                            </span>
-                          </div>
-                          <Progress
-                            value={
-                              fileItem.status === "completing"
-                                ? 100
-                                : fileItem.progress
-                            }
-                            className="h-2"
-                          />
-                        </div>
-                        {fileItem.status !== "completing" && (
-                          <div className="flex flex-wrap gap-2 text-xs">
-                            {fileItem.timeElapsed !== undefined && (
-                              <div className="bg-background/50 rounded p-2 flex-1 min-w-[120px]">
-                                <p className="text-muted-foreground mb-0.5">
-                                  Tempo decorrido
-                                </p>
-                                <p className="font-semibold text-foreground">
-                                  {formatTime(fileItem.timeElapsed)}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {isError && fileItem.error && (
-                      <p className="text-xs text-destructive mt-2">
-                        {fileItem.error}
-                      </p>
-                    )}
-                  </div>
-                  <div className="shrink-0">
-                    {isCompleted && (
-                      <span className="text-xs font-semibold text-primary">
-                        ✓ Concluído
-                      </span>
-                    )}
-                    {isError && (
-                      <span className="text-xs font-semibold text-destructive">
-                        ✗ Erro
-                      </span>
-                    )}
-                    {isPending && (
-                      <span className="text-xs font-semibold text-muted-foreground">
-                        Aguardando...
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {list}
     </div>
   );
 }

@@ -7,6 +7,7 @@ export interface MultipleFileItem {
   progress: number;
   error?: string;
   timeElapsed?: number;
+  uploadSpeed?: number;
   finalFilePath?: string;
 }
 

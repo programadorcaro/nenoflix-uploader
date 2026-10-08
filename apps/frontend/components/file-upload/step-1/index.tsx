@@ -1,10 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Button } from "@/components/ui/button";
-import { Field } from "@/components/ui/field";
 import { ContentTypeSelector } from "./content-type-selector";
 import { FolderSelector } from "./folder-selector";
+import { StepActions } from "../step-actions";
 import type { ContentType, Step1Data } from "../types";
 import { listFolders } from "@/lib/upload";
 
@@ -50,12 +49,12 @@ export function Step1({
 
   const handleNext = () => {
     if (!data.contentType) {
-      onError("Please select a content type");
+      onError("Selecione o tipo de conteúdo");
       return;
     }
     if (data.contentType === "series" || data.contentType === "animes") {
       if (!data.subFolderName.trim() && !data.selectedExistingFolder) {
-        onError("Please enter a folder name or select an existing folder");
+        onError("Informe ou escolha a pasta");
         return;
       }
     }
@@ -63,76 +62,64 @@ export function Step1({
     onNext();
   };
 
+  const isShow = data.contentType === "series" || data.contentType === "animes";
+  const folderValue = data.selectedExistingFolder || data.subFolderName;
+
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="flex flex-1 flex-col gap-5 sm:gap-6">
       <ContentTypeSelector
         selectedType={data.contentType}
         onSelect={handleContentTypeSelect}
         disabled={isUploading}
       />
 
-      {(data.contentType === "series" || data.contentType === "animes") && (
+      {isShow && (
         <FolderSelector
-          subFolderName={data.subFolderName}
-          selectedExistingFolder={data.selectedExistingFolder}
+          label={data.contentType === "series" ? "Pasta da série" : "Pasta do anime"}
+          value={folderValue}
           existingFolders={existingFolders}
           isLoadingFolders={isLoadingFolders}
-          onSubFolderNameChange={(value) =>
-            onDataChange({ subFolderName: value })
-          }
-          onExistingFolderChange={(value) =>
-            onDataChange({ selectedExistingFolder: value })
+          onChange={(value, isExisting) =>
+            onDataChange(
+              isExisting
+                ? { selectedExistingFolder: value.trim(), subFolderName: "" }
+                : { selectedExistingFolder: "", subFolderName: value }
+            )
           }
           disabled={isUploading}
         />
       )}
 
       {data.contentType && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-foreground mb-1">
-                Upload múltiplo
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {data.contentType === "movies"
-                  ? "Enviar vários filmes de uma vez em fila"
-                  : "Enviar vários arquivos de uma vez (recomendado para séries/animes)"}
-              </p>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={data.useMultipleUpload || false}
-                onChange={(e) =>
-                  onDataChange({ useMultipleUpload: e.target.checked })
-                }
-                disabled={isUploading}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-muted peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-            </label>
-          </div>
-        </div>
+        <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/40">
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-foreground">Upload múltiplo</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {data.contentType === "movies"
+                ? "Vários filmes de uma vez, em fila"
+                : "Vários episódios de uma vez"}
+            </span>
+          </span>
+          <span className="relative inline-flex shrink-0 items-center">
+            <input
+              type="checkbox"
+              checked={data.useMultipleUpload || false}
+              onChange={(e) => onDataChange({ useMultipleUpload: e.target.checked })}
+              disabled={isUploading}
+              className="peer sr-only"
+            />
+            <span className="h-7 w-12 rounded-full bg-muted transition-colors after:absolute after:top-1 after:left-1 after:size-5 after:rounded-full after:bg-white after:transition-transform after:content-[''] peer-checked:bg-primary peer-checked:after:translate-x-5 peer-focus-visible:ring-2 peer-focus-visible:ring-primary" />
+          </span>
+        </label>
       )}
 
       {error && (
-        <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg border border-destructive/20">
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      <Field orientation="horizontal" className="pt-4">
-        <Button
-          onClick={handleNext}
-          disabled={!data.contentType || isUploading}
-          type="button"
-          className="w-full sm:w-auto sm:min-w-[200px] sm:ml-auto"
-          size="lg"
-        >
-          Próximo
-        </Button>
-      </Field>
+      <StepActions primary={{ label: "Próximo", onClick: handleNext, disabled: !data.contentType || isUploading }} />
     </div>
   );
 }

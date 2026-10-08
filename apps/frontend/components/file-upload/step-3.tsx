@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import confetti from "canvas-confetti";
 import type { Step3Data, Step2Data, Step1Data } from "./types";
-import { estimateUploadTime, formatFileSize, formatTime, mediaLocation } from "./utils/format";
+import { formatFileSize, formatTime, mediaLocation } from "./utils/format";
 
 interface Step3Props {
   step1Data: Step1Data;
@@ -17,6 +17,7 @@ interface Step3Props {
   isUploading: boolean;
   uploadStatus: "idle" | "uploading" | "completing" | "success" | "error";
   timeElapsed?: number;
+  timeRemaining?: number | null;
   uploadSpeed?: number;
   finalFilePath?: string;
   onDataChange: (data: Partial<Step3Data>) => void;
@@ -33,6 +34,7 @@ export function Step3({
   isUploading,
   uploadStatus,
   timeElapsed,
+  timeRemaining,
   uploadSpeed,
   finalFilePath,
   onDataChange,
@@ -121,30 +123,6 @@ export function Step3({
     }
   }, [uploadStatus]);
 
-  // Tempo estimado fixo, calculado apenas uma vez quando temos velocidade confiável
-  const [fixedEstimatedTime, setFixedEstimatedTime] = React.useState<
-    string | null
-  >(null);
-
-  React.useEffect(() => {
-    // Calcula o tempo estimado apenas uma vez quando temos velocidade confiável
-    // Espera pelo menos 2 segundos e alguma velocidade para garantir precisão
-    if (
-      step2Data.selectedFile &&
-      uploadSpeed &&
-      uploadSpeed > 0 &&
-      timeElapsed &&
-      timeElapsed >= 2 &&
-      !fixedEstimatedTime
-    ) {
-      const estimated = estimateUploadTime(
-        step2Data.selectedFile.size,
-        uploadSpeed
-      );
-      setFixedEstimatedTime(estimated);
-    }
-  }, [uploadSpeed, timeElapsed, step2Data.selectedFile, fixedEstimatedTime]);
-
   // Resumo das informações (deve ser antes dos early returns)
   const summaryItems = React.useMemo(() => {
     const items: Array<{ label: string; value: string }> = [];
@@ -163,11 +141,6 @@ export function Step3({
         value: formatFileSize(step2Data.selectedFile.size),
       });
 
-      // Usa o tempo estimado fixo se disponível, caso contrário calcula com velocidade padrão
-      const estimatedTime =
-        fixedEstimatedTime ||
-        estimateUploadTime(step2Data.selectedFile.size);
-      items.push({ label: "Tempo estimado", value: estimatedTime });
     }
 
     return items;
@@ -175,191 +148,119 @@ export function Step3({
     folderName,
     step3Data.fileName,
     step2Data.selectedFile,
-    fixedEstimatedTime,
   ]);
 
-  if (uploadStatus === "success") {
-    return (
-      <div className="space-y-6 relative">
-        <div className="text-center py-8 sm:py-12">
-          <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
-            <div className="relative w-full max-w-32 aspect-square mx-auto">
-              <Image
-                src="/sucess.jpg"
-                alt="Upload concluído"
-                width={400}
-                height={300}
-                className="w-full h-auto object-cover rounded-2xl shadow-2xl"
-                priority
-              />
-              <div className="absolute inset-0 bg-primary/10 rounded-2xl blur-xl -z-10" />
-            </div>
-          </div>
-          <div className="space-y-6 max-w-2xl mx-auto">
-            <div className="space-y-3">
-              <h3 className="text-2xl sm:text-3xl font-bold text-primary">
-                Upload concluído com sucesso!
-              </h3>
-              <p className="text-sm sm:text-base text-muted-foreground">
-                O arquivo foi enviado com sucesso para o servidor.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-4 text-left">
-              {step3Data.fileName && (
-                <div className="space-y-1">
-                  <p className="text-xs sm:text-sm text-muted-foreground font-medium">
-                    Nome do arquivo
-                  </p>
-                  <p className="text-sm sm:text-base font-semibold text-foreground break-all">
-                    {step3Data.fileName}
-                  </p>
-                </div>
-              )}
-
-              {displayPath && (
-                <div className="space-y-1">
-                  <p className="text-xs sm:text-sm text-muted-foreground font-medium">
-                    Localização
-                  </p>
-                  <p className="text-sm sm:text-base font-mono text-foreground break-all bg-muted/50 p-2 rounded-md">
-                    {displayPath}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <Button
-              onClick={onReset}
-              type="button"
-              className="w-full sm:w-auto sm:min-w-[200px]"
-              size="lg"
-            >
-              Concluir
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (uploadStatus === "error") {
-    return (
-      <div className="space-y-6">
-        <div className="text-center py-8 sm:py-12">
-          <div className="mx-auto mb-8 max-w-xs sm:max-w-sm">
-            <div className="relative w-full max-w-32 aspect-square mx-auto">
-              <Image
-                src="/error.jpg"
-                alt="Erro no upload"
-                width={400}
-                height={300}
-                className="w-full h-auto object-cover rounded-2xl shadow-2xl"
-                priority
-              />
-              <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
-            </div>
-          </div>
-          <div className="space-y-4 max-w-md mx-auto">
-            <h3 className="text-2xl sm:text-3xl font-bold text-destructive">
-              Erro no upload
-            </h3>
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
-              <p className="text-sm sm:text-base text-destructive font-medium">
-                {error || "Ocorreu um erro ao enviar o arquivo."}
-              </p>
-            </div>
-            <Button
-              onClick={onReset}
-              type="button"
-              className="w-full sm:w-auto sm:min-w-[200px]"
-              size="lg"
-            >
-              Voltar ao Início
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 sm:space-y-8">
-      {/* Resumo */}
-      {summaryItems.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-          <h3 className="text-lg sm:text-xl font-semibold mb-4">
-            Resumo do Upload
+  const result = (ok: boolean) => (
+    <div className="flex flex-col gap-5 pb-4 sm:gap-6 sm:pb-0">
+      <div className="flex items-center gap-4 sm:flex-col sm:text-center">
+        <Image
+          src={ok ? "/sucess.jpg" : "/error.jpg"}
+          alt={ok ? "Upload concluído" : "Erro no upload"}
+          width={400}
+          height={300}
+          className="size-16 shrink-0 rounded-xl object-cover shadow-lg sm:size-28 sm:rounded-2xl"
+          priority
+        />
+        <div className="min-w-0">
+          <h3 className={`text-xl font-bold sm:text-3xl ${ok ? "text-primary" : "text-destructive"}`}>
+            {ok ? "Upload concluído com sucesso!" : "Erro no upload"}
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {summaryItems.map((item, index) => (
-              <div key={index} className="space-y-1">
-                <p className="text-xs sm:text-sm text-muted-foreground font-medium">
-                  {item.label}
-                </p>
-                <p className="text-sm sm:text-base font-semibold text-foreground">
-                  {item.value}
-                </p>
-              </div>
-            ))}
+          <p className="mt-1 text-sm text-muted-foreground">
+            {ok ? "O arquivo foi salvo na pasta do NenoFlix." : "Nada foi salvo. Tente de novo."}
+          </p>
+        </div>
+      </div>
+
+      {ok ? (
+        <dl className="grid gap-3 rounded-xl border border-border bg-card p-4 text-sm sm:grid-cols-2 sm:p-5">
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">Nome do arquivo</dt>
+            <dd className="mt-0.5 break-all font-semibold">{step3Data.fileName}</dd>
           </div>
+          {displayPath && (
+            <div className="min-w-0">
+              <dt className="text-xs text-muted-foreground">Localização</dt>
+              <dd className="mt-0.5 break-all font-mono">{displayPath}</dd>
+            </div>
+          )}
+        </dl>
+      ) : (
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm font-medium text-destructive">
+          {error || "Ocorreu um erro ao enviar o arquivo."}
         </div>
       )}
 
-      {/* Progresso do Upload */}
-      {(isUploading || uploadStatus === "completing") && (
-        <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-6 sm:p-8">
-          <div className="flex flex-col sm:flex-row items-center gap-6">
-            <div className="shrink-0 max-w-32 sm:max-w-40">
-              <div className="relative w-full max-w-32 aspect-square mx-auto">
-                <Image
-                  src="/loading.jpg"
-                  alt="Carregando"
-                  width={400}
-                  height={300}
-                  className="w-full h-auto object-cover rounded-2xl shadow-2xl"
-                  priority
-                />
-                <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
-              </div>
-            </div>
-            <div className="flex-1 w-full space-y-4">
-              <div>
-                <h3 className="text-lg sm:text-xl font-semibold mb-2">
-                  {uploadStatus === "completing"
-                    ? "Finalizando upload..."
-                    : "Enviando arquivo"}
-                </h3>
-                <Progress
-                  value={uploadStatus === "completing" ? 100 : progress}
-                  className="h-3 mb-3"
-                />
-                <p className="text-sm text-muted-foreground">
-                  {Math.round(progress)}% concluído
-                </p>
-              </div>
+      <Button
+        onClick={onReset}
+        type="button"
+        className="h-12 w-full text-base font-semibold sm:mx-auto sm:h-11 sm:w-auto sm:min-w-48"
+      >
+        {ok ? "Concluir" : "Voltar ao início"}
+      </Button>
+    </div>
+  );
 
-              {uploadStatus !== "completing" && (
-                <div className="text-sm">
-                  {timeElapsed !== undefined && (
-                    <div className="bg-background/50 rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Tempo decorrido
-                      </p>
-                      <p className="text-base font-semibold text-foreground">
-                        {formatTime(timeElapsed)}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+  if (uploadStatus === "success") return result(true);
+  if (uploadStatus === "error") return result(false);
+
+  const completing = uploadStatus === "completing";
+  const stats = [
+    { label: "Velocidade", value: uploadSpeed ? `${(uploadSpeed / 1048576).toFixed(1)} MB/s` : "—" },
+    { label: "Decorrido", value: timeElapsed !== undefined ? formatTime(timeElapsed) : "—" },
+    { label: "Restante", value: completing ? "0s" : timeRemaining != null ? formatTime(timeRemaining) : "—" },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4 pb-4 sm:gap-5 sm:pb-0">
+      {(isUploading || completing) && (
+        <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-4 sm:p-6">
+          <div className="flex items-center gap-4">
+            <Image
+              src="/loading.jpg"
+              alt=""
+              width={400}
+              height={300}
+              className="size-14 shrink-0 rounded-xl object-cover shadow-lg sm:size-20"
+              priority
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <h3 className="text-base font-semibold sm:text-lg">
+                  {completing ? "Finalizando..." : "Enviando arquivo"}
+                </h3>
+                <span className="text-2xl font-bold tabular-nums text-primary">
+                  {completing ? 100 : Math.round(progress)}%
+                </span>
+              </div>
+              <Progress value={completing ? 100 : progress} className="mt-2 h-2.5" />
             </div>
           </div>
+          <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+            {stats.map((s) => (
+              <div key={s.label} className="rounded-lg bg-background/50 px-2 py-2">
+                <dt className="text-[11px] text-muted-foreground">{s.label}</dt>
+                <dd className="mt-0.5 text-sm font-semibold tabular-nums">{s.value}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
+      )}
+
+      {summaryItems.length > 0 && (
+        <dl className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-card p-4 text-sm sm:p-5">
+          {summaryItems.map((item) => (
+            <div key={item.label} className="min-w-0">
+              <dt className="text-xs text-muted-foreground">{item.label}</dt>
+              <dd className="mt-0.5 truncate font-semibold" title={item.value}>
+                {item.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
       )}
 
       {error && uploadStatus === "idle" && (
-        <div className="text-sm text-destructive bg-destructive/10 p-4 rounded-lg border border-destructive/20">
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
           {error}
         </div>
       )}

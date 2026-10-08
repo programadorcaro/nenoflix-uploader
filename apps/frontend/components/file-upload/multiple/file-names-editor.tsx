@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { extractFileName } from "../utils/format";
+import { extractFileName, formatFileSize } from "../utils/format";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
@@ -48,89 +48,42 @@ export function FileNamesEditor({
     });
   };
 
+  const isShow = contentType === "series" || contentType === "animes";
+
   return (
-    <div className="space-y-4">
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-sm font-semibold text-foreground">
-            Definir nomes dos arquivos
-          </p>
-          {(contentType === "series" || contentType === "animes") && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleApplySuggestions}
-              disabled={disabled}
-              className="text-xs"
-            >
-              Aplicar sugestão de nomes
-            </Button>
-          )}
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold sm:text-base">Nomes dos arquivos</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Cada arquivo será salvo com o nome abaixo.</p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Cada arquivo será salvo com o nome definido abaixo. Os nomes são
-          pré-preenchidos automaticamente.
-        </p>
+        {isShow && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleApplySuggestions}
+            disabled={disabled}
+            className="h-11 w-full shrink-0 sm:w-auto"
+          >
+            Aplicar sugestão de nomes
+          </Button>
+        )}
       </div>
 
-      <div className="space-y-3 max-h-96 overflow-y-auto">
+      <ol className="flex flex-col gap-3">
         {files.map((fileItem, index) => (
-          <div
-            key={fileItem.id}
-            className="rounded-lg border border-border bg-card p-4 space-y-3"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-muted-foreground mb-1">
-                  Arquivo {index + 1} de {files.length}
-                </p>
-                <p className="text-sm font-medium text-foreground truncate">
+          <li key={fileItem.id} className="rounded-xl border border-border bg-card p-3 sm:p-4">
+            <Field className="gap-2">
+              <FieldLabel
+                htmlFor={`file-name-${fileItem.id}`}
+                className="flex min-w-0 items-baseline gap-2 text-xs font-normal text-muted-foreground"
+              >
+                <span className="shrink-0 font-semibold text-primary">{index + 1}.</span>
+                <span className="truncate" title={fileItem.originalFileName}>
                   {fileItem.originalFileName}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {(fileItem.file.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-              </div>
-            </div>
-
-            <Field>
-              <div className="flex items-center gap-2 mb-2">
-                <FieldLabel
-                  htmlFor={`file-name-${fileItem.id}`}
-                  className="text-sm font-semibold"
-                >
-                  Nome do arquivo <span className="text-destructive">*</span>
-                </FieldLabel>
-                {(contentType === "series" || contentType === "animes") && (
-                  <div className="group relative">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-4 h-4 text-muted-foreground cursor-help"
-                    >
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                      <path d="M12 17h.01" />
-                    </svg>
-                    <div className="absolute left-0 top-6 z-10 hidden group-hover:block w-64 p-2 bg-popover border border-border rounded-md shadow-md text-xs text-popover-foreground">
-                      <p className="font-semibold mb-1">Sugestão:</p>
-                      <p className="text-muted-foreground">
-                        {generateSuggestedName(
-                          folderName,
-                          fileItem.originalFileName,
-                          index
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
+                </span>
+                <span className="ml-auto shrink-0">{formatFileSize(fileItem.file.size)}</span>
+              </FieldLabel>
               <Input
                 id={`file-name-${fileItem.id}`}
                 placeholder="Digite o nome do arquivo"
@@ -138,12 +91,13 @@ export function FileNamesEditor({
                 onChange={(e) => onFileNameChange(fileItem.id, e.target.value)}
                 disabled={disabled}
                 required
-                className="text-base"
+                aria-invalid={!fileItem.fileName.trim()}
+                className="h-11 text-base"
               />
             </Field>
-          </div>
+          </li>
         ))}
-      </div>
+      </ol>
     </div>
   );
 }

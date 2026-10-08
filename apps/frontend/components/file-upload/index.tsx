@@ -39,6 +39,9 @@ const initialState: FileUploadState = {
 export function FileUpload({ onComplete }: FileUploadProps) {
   const [currentStep, setCurrentStep] = React.useState(1);
   const [state, setState] = React.useState<FileUploadState>(initialState);
+  const [multiUploading, setMultiUploading] = React.useState(false);
+  // The multiple flow runs inside step 2; show it as step 3 once files are sending.
+  const shownStep = multiUploading ? 3 : currentStep;
   const abortRef = React.useRef<AbortController | null>(null);
   React.useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -92,6 +95,7 @@ export function FileUpload({ onComplete }: FileUploadProps) {
 
   const handleReset = React.useCallback(() => {
     abortRef.current?.abort();
+    setMultiUploading(false);
     setState(initialState);
     setCurrentStep(1);
   }, []);
@@ -170,106 +174,78 @@ export function FileUpload({ onComplete }: FileUploadProps) {
     }
   };
 
-  const steps = [
-    {
-      number: 1,
-      label: "Tipo de Conteúdo",
-      active: currentStep === 1,
-      completed: currentStep > 1,
-    },
-    {
-      number: 2,
-      label: "Selecionar Arquivo",
-      active: currentStep === 2,
-      completed: currentStep > 2,
-    },
-    {
-      number: 3,
-      label: "Upload",
-      active: currentStep === 3,
-      completed: currentStep > 3,
-    },
-  ];
+  const steps = ["Tipo de conteúdo", "Selecionar arquivos", "Upload"];
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <div className="mb-6 flex justify-center">
+    <Card className="min-h-dvh w-full gap-0 overflow-visible rounded-none bg-transparent py-0 shadow-none ring-0 sm:rounded-2xl sm:bg-card sm:min-h-0 sm:shadow-xs sm:ring-1">
+      <CardHeader className="gap-0 px-4 pt-5 pb-4 sm:px-8 sm:pt-8 sm:pb-6">
+        <div className="flex justify-center">
           <Image
             src="/logo-rosa.png"
-            alt="Logo"
+            alt="NenoFlix"
             width={140}
             height={56}
-            className="h-14 w-auto"
+            className="h-9 w-auto sm:h-12"
             priority
           />
         </div>
-        <CardTitle className="text-center text-2xl mb-2">File Upload</CardTitle>
-        <CardDescription className="text-center">
-          Upload files (.mkv, .mp4, .srt) to the server
+        <CardTitle className="sr-only">Upload NenoFlix</CardTitle>
+        <CardDescription className="mt-2 hidden text-center sm:block">
+          Envie filmes, séries e animes (.mkv, .mp4, .srt) para o NenoFlix
         </CardDescription>
-      </CardHeader>
-      <CardContent>
+
         {/* Stepper */}
-        <div className="mb-8 sm:mb-10">
-          <div className="flex items-center justify-between">
-            {steps.map((step, index) => (
-              <React.Fragment key={step.number}>
-                <div className="flex flex-col items-center flex-1 min-w-0">
+        <ol className="mt-5 flex items-center sm:mt-7" aria-label="Etapas">
+          {steps.map((label, index) => {
+            const number = index + 1;
+            const active = shownStep === number;
+            const completed = shownStep > number;
+            return (
+              <React.Fragment key={label}>
+                <li className="flex min-w-0 flex-col items-center gap-2" aria-current={active ? "step" : undefined}>
                   <div
-                    className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 transition-all ${
-                      step.completed
-                        ? "bg-primary border-primary text-primary-foreground"
-                        : step.active
+                    className={`flex size-8 items-center justify-center rounded-full border-2 text-sm font-semibold transition-colors sm:size-10 ${
+                      completed
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : active
                           ? "border-primary bg-primary/10 text-primary shadow-md shadow-primary/20"
                           : "border-muted-foreground/30 bg-muted text-muted-foreground"
                     }`}
                   >
-                    {step.completed ? (
-                      <svg
-                        className="w-5 h-5 sm:w-6 sm:h-6"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2.5}
-                          d="M5 13l4 4L19 7"
-                        />
+                    {completed ? (
+                      <svg className="size-4 sm:size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                       </svg>
                     ) : (
-                      <span className="text-sm sm:text-base font-semibold">
-                        {step.number}
-                      </span>
+                      number
                     )}
                   </div>
                   <span
-                    className={`mt-2 sm:mt-3 text-xs sm:text-sm font-medium text-center hidden sm:block px-1 ${
-                      step.active
-                        ? "text-primary"
-                        : step.completed
-                          ? "text-primary"
-                          : "text-muted-foreground"
+                    className={`hidden whitespace-nowrap text-xs font-medium sm:block ${
+                      active || completed ? "text-primary" : "text-muted-foreground"
                     }`}
                   >
-                    {step.label}
+                    {label}
                   </span>
-                </div>
+                </li>
                 {index < steps.length - 1 && (
-                  <div
-                    className={`flex-1 h-0.5 mx-2 sm:mx-4 transition-colors ${
-                      step.completed ? "bg-primary" : "bg-muted-foreground/30"
+                  <li
+                    aria-hidden
+                    className={`mx-2 h-0.5 flex-1 rounded-full transition-colors sm:mx-3 sm:mb-6 ${
+                      completed ? "bg-primary" : "bg-muted-foreground/30"
                     }`}
                   />
                 )}
               </React.Fragment>
-            ))}
-          </div>
-        </div>
-
-        <FieldGroup>
+            );
+          })}
+        </ol>
+        <p className="mt-3 text-center text-sm font-medium text-primary sm:hidden">
+          Passo {shownStep} de {steps.length} · {steps[shownStep - 1]}
+        </p>
+      </CardHeader>
+      <CardContent className="flex flex-1 flex-col px-4 pb-0 sm:px-8 sm:pb-8">
+        <FieldGroup className="flex-1 gap-6">
           {currentStep === 1 && (
             <Step1
               data={state.step1}
@@ -295,6 +271,7 @@ export function FileUpload({ onComplete }: FileUploadProps) {
                   }
                   contentType={state.step1.contentType}
                   onReset={handleReset}
+                  onUploadStart={() => setMultiUploading(true)}
                 />
               ) : (
                 <Step2
@@ -322,6 +299,7 @@ export function FileUpload({ onComplete }: FileUploadProps) {
               isUploading={state.isUploading}
               uploadStatus={state.uploadStatus}
               timeElapsed={state.timeElapsed}
+              timeRemaining={state.timeRemaining}
               uploadSpeed={state.uploadSpeed}
               finalFilePath={state.finalFilePath}
               onDataChange={updateStep3Data}

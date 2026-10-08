@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Outfit } from "next/font/google";
 import "./globals.css";
 
@@ -11,7 +11,14 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Upload NenoFlix",
-  description: "Upload files to NenoFlix",
+  description: "Envie filmes, séries e animes para o NenoFlix",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#09090b",
 };
 
 export default function RootLayout({
@@ -20,7 +27,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={outfit.variable}>
+    <html lang="pt-BR" className={outfit.variable}>
       <body
         className={`dark ${geistMono.variable} antialiased`}
         suppressHydrationWarning={true}

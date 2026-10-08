@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Button } from "@/components/ui/button";
+import { StepActions } from "../step-actions";
 import { MultipleFileSelector } from "./multiple-file-selector";
 import { FileNamesEditor } from "./file-names-editor";
 import { MultipleUploadProgress } from "./multiple-upload-progress";
@@ -14,12 +14,15 @@ interface MultipleUploadProps {
   folderName: string;
   contentType: "series" | "animes" | "movies";
   onReset: () => void;
+  /** Called when files start uploading, so the stepper can show step 3. */
+  onUploadStart?: () => void;
 }
 
 export function MultipleUpload({
   folderName,
   contentType,
   onReset,
+  onUploadStart,
 }: MultipleUploadProps) {
   const [state, setState] = React.useState<MultipleUploadState>({
     files: [],
@@ -110,6 +113,7 @@ export function MultipleUpload({
     }));
 
     setCurrentStep("upload");
+    onUploadStart?.();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -132,7 +136,11 @@ export function MultipleUpload({
             signal: controller.signal,
             onFinalizing: () => patch(fileItem.id, { status: "completing" }),
             onProgress: (p) =>
-              patch(fileItem.id, { progress: p.percentage, timeElapsed: p.timeElapsed }),
+              patch(fileItem.id, {
+                progress: p.percentage,
+                timeElapsed: p.timeElapsed,
+                uploadSpeed: p.uploadSpeed,
+              }),
           }
         );
         patch(fileItem.id, { status: "completed", progress: 100, finalFilePath });
@@ -158,51 +166,31 @@ export function MultipleUpload({
     onReset();
   };
 
+  const errorBox = state.error && (
+    <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+      {state.error}
+    </div>
+  );
+
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="flex flex-1 flex-col gap-5 sm:gap-6">
       {currentStep === "select" && (
         <>
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-base font-semibold mb-3">
-                Selecionar Arquivos
-              </h3>
-              <MultipleFileSelector
-                files={state.files}
-                onFilesSelect={handleFilesSelect}
-                onFileRemove={handleFileRemove}
-                disabled={state.isUploading}
-              />
-            </div>
-
-            {state.error && (
-              <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg border border-destructive/20">
-                {state.error}
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row gap-3 pt-4">
-              <Button
-                onClick={onReset}
-                disabled={state.isUploading}
-                type="button"
-                variant="outline"
-                className="flex-1 sm:flex-initial sm:min-w-[120px]"
-                size="lg"
-              >
-                Voltar
-              </Button>
-              <Button
-                onClick={handleGoToNames}
-                disabled={!canGoToNames || state.isUploading}
-                type="button"
-                className="flex-1 sm:flex-initial sm:min-w-[200px] sm:ml-auto"
-                size="lg"
-              >
-                Próximo
-              </Button>
-            </div>
-          </div>
+          <MultipleFileSelector
+            files={state.files}
+            onFilesSelect={handleFilesSelect}
+            onFileRemove={handleFileRemove}
+            disabled={state.isUploading}
+          />
+          {errorBox}
+          <StepActions
+            back={{ onClick: onReset, disabled: state.isUploading }}
+            primary={{
+              label: state.files.length ? `Próximo (${state.files.length})` : "Próximo",
+              onClick: handleGoToNames,
+              disabled: !canGoToNames || state.isUploading,
+            }}
+          />
         </>
       )}
 
@@ -215,34 +203,15 @@ export function MultipleUpload({
             contentType={contentType}
             disabled={state.isUploading}
           />
-
-          {state.error && (
-            <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-lg border border-destructive/20">
-              {state.error}
-            </div>
-          )}
-
-          <div className="flex flex-col sm:flex-row gap-3 pt-4">
-            <Button
-              onClick={handleBackToSelect}
-              disabled={state.isUploading}
-              type="button"
-              variant="outline"
-              className="flex-1 sm:flex-initial sm:min-w-[120px]"
-              size="lg"
-            >
-              Voltar
-            </Button>
-            <Button
-              onClick={handleStartUpload}
-              disabled={!canStartUpload || state.isUploading}
-              type="button"
-              className="flex-1 sm:flex-initial sm:min-w-[200px] sm:ml-auto"
-              size="lg"
-            >
-              Iniciar Upload
-            </Button>
-          </div>
+          {errorBox}
+          <StepActions
+            back={{ onClick: handleBackToSelect, disabled: state.isUploading }}
+            primary={{
+              label: `Enviar ${state.files.length} arquivo${state.files.length !== 1 ? "s" : ""}`,
+              onClick: handleStartUpload,
+              disabled: !canStartUpload || state.isUploading,
+            }}
+          />
         </>
       )}
 

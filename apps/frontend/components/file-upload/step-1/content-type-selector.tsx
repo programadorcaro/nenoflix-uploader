@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Video01Icon, Tv01Icon, PlayIcon } from "@hugeicons/core-free-icons";
 import type { ContentType } from "../types";
@@ -11,60 +10,42 @@ interface ContentTypeSelectorProps {
   disabled?: boolean;
 }
 
-export function ContentTypeSelector({
-  selectedType,
-  onSelect,
-  disabled = false,
-}: ContentTypeSelectorProps) {
-  const options = [
-    {
-      type: "movies" as ContentType,
-      icon: Video01Icon,
-      label: "Filmes",
-    },
-    {
-      type: "series" as ContentType,
-      icon: Tv01Icon,
-      label: "Séries",
-    },
-    {
-      type: "animes" as ContentType,
-      icon: PlayIcon,
-      label: "Animes",
-    },
-  ];
+const OPTIONS = [
+  { type: "movies", icon: Video01Icon, label: "Filmes" },
+  { type: "series", icon: Tv01Icon, label: "Séries" },
+  { type: "animes", icon: PlayIcon, label: "Animes" },
+] as const;
 
+export function ContentTypeSelector({ selectedType, onSelect, disabled = false }: ContentTypeSelectorProps) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      {options.map((option) => (
-        <button
-          key={option.type}
-          type="button"
-          onClick={() => onSelect(option.type)}
-          disabled={disabled}
-          className={`p-6 rounded-xl border-2 transition-all duration-200 ${
-            selectedType === option.type
-              ? "border-primary bg-primary/10 shadow-md shadow-primary/20 scale-[1.02]"
-              : "border-border hover:border-primary/50 hover:bg-muted/50"
-          } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-        >
-          <div className="flex flex-col items-center gap-3">
+    <div role="radiogroup" aria-label="Tipo de conteúdo" className="grid grid-cols-3 gap-2 sm:gap-4">
+      {OPTIONS.map(({ type, icon, label }) => {
+        const selected = selectedType === type;
+        return (
+          <button
+            key={type}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onSelect(type)}
+            disabled={disabled}
+            className={`flex flex-col items-center gap-1.5 rounded-xl border-2 px-2 py-3 transition-colors sm:gap-3 sm:p-6 ${
+              selected
+                ? "border-primary bg-primary/10 shadow-md shadow-primary/20"
+                : "border-border hover:border-primary/50 hover:bg-muted/50"
+            } ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+          >
             <HugeiconsIcon
-              icon={option.icon}
-              className={`size-10 sm:size-12 transition-transform ${
-                selectedType === option.type ? "text-primary scale-110" : "text-muted-foreground"
-              }`}
+              icon={icon}
+              className={`size-6 sm:size-11 ${selected ? "text-primary" : "text-muted-foreground"}`}
               strokeWidth={1.5}
             />
-            <span className={`text-base sm:text-lg font-medium transition-colors ${
-              selectedType === option.type ? "text-primary" : "text-foreground"
-            }`}>
-              {option.label}
+            <span className={`text-sm font-medium sm:text-lg ${selected ? "text-primary" : "text-foreground"}`}>
+              {label}
             </span>
-          </div>
-        </button>
-      ))}
+          </button>
+        );
+      })}
     </div>
   );
 }
-

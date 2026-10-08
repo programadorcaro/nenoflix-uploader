@@ -2,10 +2,10 @@ import { FileUpload } from "@/components/file-upload/index";
 
 export default function Page() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 lg:p-8">
-      <div className="w-full max-w-4xl">
+    <main className="flex min-h-dvh justify-center sm:items-center sm:p-6 lg:p-8">
+      <div className="w-full sm:max-w-2xl">
         <FileUpload />
       </div>
-    </div>
+    </main>
   );
 }
