@@ -6,7 +6,6 @@ export interface MultipleFileItem {
   status: "pending" | "uploading" | "completing" | "completed" | "error";
   progress: number;
   error?: string;
-  uploadId?: string;
   timeElapsed?: number;
   finalFilePath?: string;
 }
@@ -15,6 +14,5 @@ export interface MultipleUploadState {
   files: MultipleFileItem[];
   currentUploadIndex: number;
   isUploading: boolean;
-  allCompleted: boolean;
   error: string | null;
 }

@@ -6,51 +6,40 @@ import { MultipleFileSelector } from "./multiple-file-selector";
 import { FileNamesEditor } from "./file-names-editor";
 import { MultipleUploadProgress } from "./multiple-upload-progress";
 import type { MultipleFileItem, MultipleUploadState } from "./types";
-import { BACKEND_URL } from "../constants";
-import { UploadChunker } from "@/lib/upload-chunker";
-import { UploadStateManager } from "@/lib/upload-state";
+import { uploadFile } from "@/lib/upload";
 import { extractEpisodeInfo } from "../utils/name-suggestion";
+import { extractFileName } from "../utils/format";
 
 interface MultipleUploadProps {
   folderName: string;
-  destinationPath: string;
   contentType: "series" | "animes" | "movies";
-  onComplete?: () => void;
   onReset: () => void;
 }
 
 export function MultipleUpload({
   folderName,
-  destinationPath,
   contentType,
-  onComplete,
   onReset,
 }: MultipleUploadProps) {
   const [state, setState] = React.useState<MultipleUploadState>({
     files: [],
     currentUploadIndex: 0,
     isUploading: false,
-    allCompleted: false,
     error: null,
   });
+  const abortRef = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => abortRef.current?.abort(), []);
 
   const [currentStep, setCurrentStep] = React.useState<
     "select" | "names" | "upload"
   >("select");
-
-  // Extrai nome do arquivo sem extensão
-  const extractFileName = (file: File): string => {
-    const lastDotIndex = file.name.lastIndexOf(".");
-    if (lastDotIndex === -1) return file.name;
-    return file.name.substring(0, lastDotIndex);
-  };
 
   // Adiciona arquivos à lista
   const handleFilesSelect = (newFiles: File[]) => {
     const newFileItems: MultipleFileItem[] = newFiles.map((file) => ({
       id: `${Date.now()}-${Math.random()}`,
       file,
-      fileName: extractFileName(file),
+      fileName: extractFileName(file.name),
       originalFileName: file.name,
       status: "pending",
       progress: 0,
@@ -121,239 +110,40 @@ export function MultipleUpload({
     }));
 
     setCurrentStep("upload");
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    // Pequeno delay para garantir que o React renderize a mudança de step
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Upload em fila (um por vez) - usando a lista capturada
-    for (let i = 0; i < filesToUpload.length; i++) {
-      const fileItem = filesToUpload[i];
-      if (!fileItem) continue;
-      const fileId = fileItem.id;
-
-      // Atualiza índice atual e status para uploading
+    const patch = (id: string, data: Partial<MultipleFileItem>) =>
       setState((prev) => ({
         ...prev,
-        currentUploadIndex: i,
-        files: prev.files.map((f) =>
-          f.id === fileId
-            ? { ...f, status: "uploading" as const, progress: 0 }
-            : f
-        ),
+        files: prev.files.map((f) => (f.id === id ? { ...f, ...data } : f)),
       }));
 
-      // Pequeno delay para garantir que o React processe a atualização de estado
-      if (i === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-
-      let chunker: UploadChunker | null = null;
-
+    // One file at a time: the chunk pool already saturates the link.
+    for (const [i, fileItem] of filesToUpload.entries()) {
+      if (controller.signal.aborted) break;
+      setState((prev) => ({ ...prev, currentUploadIndex: i }));
+      patch(fileItem.id, { status: "uploading", progress: 0 });
       try {
-        // Initialize upload session
-        const initResponse = await fetch(`${BACKEND_URL}/upload/init`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            fileName: fileItem.fileName.trim(),
-            folderName: folderName,
-            destinationPath: destinationPath,
-            totalSize: fileItem.file.size,
-            originalFileName: fileItem.originalFileName,
-          }),
-        });
-
-        const initResult = await initResponse.json();
-
-        if (!initResult.success) {
-          throw new Error(initResult.error || "Failed to initialize upload");
-        }
-
-        const uploadId = initResult.uploadId;
-
-        // Create chunker with optimal chunk size from backend
-        const optimalChunkSize = initResult.chunkSize;
-        chunker = new UploadChunker(
+        const finalFilePath = await uploadFile(
           fileItem.file,
-          BACKEND_URL,
-          optimalChunkSize
+          { type: contentType, folder: folderName, fileName: fileItem.fileName.trim() },
+          {
+            signal: controller.signal,
+            onFinalizing: () => patch(fileItem.id, { status: "completing" }),
+            onProgress: (p) =>
+              patch(fileItem.id, { progress: p.percentage, timeElapsed: p.timeElapsed }),
+          }
         );
-        chunker.setUploadId(uploadId);
-
-        // Progress callback - igual ao upload único
-        chunker.setProgressCallback((progress) => {
-          setState((prev) => ({
-            ...prev,
-            files: prev.files.map((f) =>
-              f.id === fileId
-                ? {
-                    ...f,
-                    progress: progress.percentage,
-                    timeElapsed: progress.timeElapsed,
-                  }
-                : f
-            ),
-          }));
-        });
-
-        // Save session state
-        const stateManager = new UploadStateManager(uploadId);
-        stateManager.save({
-          uploadId,
-          fileName: fileItem.fileName.trim(),
-          folderName: folderName,
-          destinationPath: destinationPath,
-          totalSize: fileItem.file.size,
-          totalChunks: initResult.totalChunks,
-          chunkSize: initResult.chunkSize,
-          timestamp: Date.now(),
-        });
-
-        // Upload all chunks
-        await chunker.uploadAll();
-
-        // Update UI to show "completing..." during completion
-        setState((prev) => ({
-          ...prev,
-          files: prev.files.map((f) =>
-            f.id === fileId ? { ...f, status: "completing" as const } : f
-          ),
-        }));
-
-        // Complete upload
-        let completeResult: any;
-        try {
-          const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ uploadId }),
-          });
-
-          completeResult = await completeResponse.json();
-        } catch (error: any) {
-          // Se receber erro 524 (timeout do gateway), verificar status do servidor
-          if (error.message?.includes("524") || error.message?.includes("timeout")) {
-            console.log("Gateway timeout (524), checking server status...");
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-            
-            const statusResponse = await fetch(
-              `${BACKEND_URL}/upload/status/${uploadId}`
-            );
-            if (statusResponse.ok) {
-              const statusResult = await statusResponse.json();
-              if (statusResult.success && statusResult.isComplete) {
-                completeResult = {
-                  success: true,
-                  path: statusResult.finalPath,
-                  processing: statusResult.processing,
-                };
-              } else {
-                throw new Error("Upload not complete on server");
-              }
-            } else {
-              throw error;
-            }
-          } else {
-            throw error;
-          }
-        }
-
-        // Se está processando, aguardar processamento completar
-        if (completeResult.processing) {
-          let attempts = 0;
-          const maxAttempts = 30;
-          
-          while (completeResult.processing && attempts < maxAttempts) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            
-            const statusResponse = await fetch(
-              `${BACKEND_URL}/upload/status/${uploadId}`
-            );
-            if (statusResponse.ok) {
-              const statusResult = await statusResponse.json();
-              if (statusResult.success) {
-                if (statusResult.finalPath) {
-                  completeResult.path = statusResult.finalPath;
-                  completeResult.processing = false;
-                  break;
-                }
-                if (statusResult.processingError) {
-                  throw new Error(statusResult.processingError);
-                }
-              }
-            }
-            attempts++;
-          }
-          
-          if (completeResult.processing) {
-            throw new Error("Processing timeout - file may still be processing");
-          }
-        }
-
-        if (!completeResult.success) {
-          throw new Error(completeResult.error || "Failed to complete upload");
-        }
-
-        // Clear session state
-        stateManager.clear();
-
-        // Construir caminho final
-        let finalFilePath = destinationPath;
-        if (folderName) {
-          finalFilePath = `${destinationPath}/${folderName}`;
-        }
-        finalFilePath = `${finalFilePath}/${fileItem.fileName.trim()}`;
-
-        // Marca como concluído
-        setState((prev) => ({
-          ...prev,
-          files: prev.files.map((f) =>
-            f.id === fileId
-              ? {
-                  ...f,
-                  status: "completed" as const,
-                  progress: 100,
-                  finalFilePath: completeResult.path || finalFilePath,
-                  uploadId: uploadId,
-                }
-              : f
-          ),
-        }));
+        patch(fileItem.id, { status: "completed", progress: 100, finalFilePath });
       } catch (error) {
-        if (chunker) {
-          chunker.cancel();
-        }
-
-        const errorMessage =
-          error instanceof Error ? error.message : "Upload failed";
-
-        // Marca como erro
-        setState((prev) => ({
-          ...prev,
-          files: prev.files.map((f) =>
-            f.id === fileId
-              ? {
-                  ...f,
-                  status: "error" as const,
-                  error: errorMessage,
-                }
-              : f
-          ),
-          error: errorMessage,
-        }));
+        const message = error instanceof Error ? error.message : "Upload failed";
+        patch(fileItem.id, { status: "error", error: message });
+        setState((prev) => ({ ...prev, error: message }));
       }
     }
 
-    // Todos os uploads finalizados
-    setState((prev) => ({
-      ...prev,
-      isUploading: false,
-      allCompleted: true,
-    }));
+    setState((prev) => ({ ...prev, isUploading: false }));
   };
 
   // Reset completo
@@ -362,7 +152,6 @@ export function MultipleUpload({
       files: [],
       currentUploadIndex: 0,
       isUploading: false,
-      allCompleted: false,
       error: null,
     });
     setCurrentStep("select");

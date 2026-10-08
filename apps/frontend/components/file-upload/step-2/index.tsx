@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { extractFileName } from "../utils/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -27,15 +28,9 @@ export function Step2({
   contentType,
   folderName = "",
 }: Step2Props) {
-  const extractFileName = (file: File): string => {
-    const lastDotIndex = file.name.lastIndexOf(".");
-    if (lastDotIndex === -1) return file.name;
-    return file.name.substring(0, lastDotIndex);
-  };
-
   const handleFileSelect = (file: File | null) => {
     if (file) {
-      const fileName = extractFileName(file);
+      const fileName = extractFileName(file.name);
       onDataChange({ selectedFile: file, fileName });
     } else {
       onDataChange({ selectedFile: null, fileName: "" });

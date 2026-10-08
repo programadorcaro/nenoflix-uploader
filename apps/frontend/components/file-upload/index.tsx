@@ -15,42 +15,32 @@ import { Step2 } from "./step-2";
 import { Step3 } from "./step-3";
 import { MultipleUpload } from "./multiple";
 import type { FileUploadState, Step1Data, Step2Data, Step3Data } from "./types";
-import { BACKEND_URL } from "./constants";
-import { UploadChunker } from "@/lib/upload-chunker";
-import { UploadStateManager } from "@/lib/upload-state";
+import { uploadFile } from "@/lib/upload";
 
 interface FileUploadProps {
   onComplete?: () => void;
-  destinationPath?: string;
 }
 
-export function FileUpload({
-  onComplete,
-  destinationPath = "tmp",
-}: FileUploadProps) {
+const initialState: FileUploadState = {
+  step1: {
+    contentType: null,
+    subFolderName: "",
+    selectedExistingFolder: "",
+    useMultipleUpload: false,
+  },
+  step2: { selectedFile: null, fileName: "" },
+  step3: { folderName: "", fileName: "", selectedFile: null },
+  progress: 0,
+  isUploading: false,
+  uploadStatus: "idle",
+  error: null,
+};
+
+export function FileUpload({ onComplete }: FileUploadProps) {
   const [currentStep, setCurrentStep] = React.useState(1);
-  const [state, setState] = React.useState<FileUploadState>({
-    step1: {
-      contentType: null,
-      baseDestinationPath: "",
-      subFolderName: "",
-      selectedExistingFolder: "",
-      useMultipleUpload: false,
-    },
-    step2: {
-      selectedFile: null,
-      fileName: "",
-    },
-    step3: {
-      folderName: "",
-      fileName: "",
-      selectedFile: null,
-    },
-    progress: 0,
-    isUploading: false,
-    uploadStatus: "idle",
-    error: null,
-  });
+  const [state, setState] = React.useState<FileUploadState>(initialState);
+  const abortRef = React.useRef<AbortController | null>(null);
+  React.useEffect(() => () => abortRef.current?.abort(), []);
 
   const updateStep1Data = (data: Partial<Step1Data>) => {
     setState((prev) => ({
@@ -77,13 +67,6 @@ export function FileUpload({
     setState((prev) => ({ ...prev, error }));
   };
 
-  const getFinalDestinationPath = (): string => {
-    const { step1 } = state;
-    // Retorna apenas o base path (movies, series, animes)
-    // O folderName será usado pelo backend para criar a pasta intermediária
-    return step1.baseDestinationPath || destinationPath;
-  };
-
   const handleNextStep = () => {
     setState((prev) => {
       // Quando avança do Step 2 para o Step 3, copia o fileName do Step 2 para o Step 3
@@ -108,31 +91,8 @@ export function FileUpload({
   };
 
   const handleReset = React.useCallback(() => {
-    setState({
-      step1: {
-        contentType: null,
-        baseDestinationPath: "",
-        subFolderName: "",
-        selectedExistingFolder: "",
-      },
-      step2: {
-        selectedFile: null,
-        fileName: "",
-      },
-      step3: {
-        folderName: "",
-        fileName: "",
-        selectedFile: null,
-      },
-      progress: 0,
-      isUploading: false,
-      uploadStatus: "idle",
-      error: null,
-      timeElapsed: undefined,
-      timeRemaining: undefined,
-      uploadSpeed: undefined,
-      finalFilePath: undefined,
-    });
+    abortRef.current?.abort();
+    setState(initialState);
     setCurrentStep(1);
   }, []);
 
@@ -169,190 +129,44 @@ export function FileUpload({
 
     const file = step2.selectedFile;
     const fileName = step3.fileName.trim();
-    const destinationPath = getFinalDestinationPath();
-
-    let chunker: UploadChunker | null = null;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
-      // Initialize upload session
-      const initResponse = await fetch(`${BACKEND_URL}/upload/init`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fileName,
-          folderName,
-          destinationPath,
-          totalSize: file.size,
-          originalFileName: file.name,
-        }),
-      });
-
-      const initResult = await initResponse.json();
-
-      if (!initResult.success) {
-        throw new Error(initResult.error || "Failed to initialize upload");
-      }
-
-      const uploadId = initResult.uploadId;
-
-      // Create chunker with optimal chunk size from backend
-      const optimalChunkSize = initResult.chunkSize;
-      chunker = new UploadChunker(file, BACKEND_URL, optimalChunkSize);
-      chunker.setUploadId(uploadId);
-
-      chunker.setProgressCallback((progress) => {
-        setState((prev) => ({
-          ...prev,
-          progress: progress.percentage,
-          timeElapsed: progress.timeElapsed,
-          timeRemaining: progress.timeRemaining,
-          uploadSpeed: progress.uploadSpeed,
-        }));
-      });
-
-      // Save session state
-      const stateManager = new UploadStateManager(uploadId);
-      stateManager.save({
-        uploadId,
-        fileName,
-        folderName,
-        destinationPath,
-        totalSize: file.size,
-        totalChunks: initResult.totalChunks,
-        chunkSize: initResult.chunkSize,
-        timestamp: Date.now(),
-      });
-
-      // Upload all chunks
-      await chunker.uploadAll();
-
-      // Update UI to show "enviando..." during completion
-      setState((prev) => ({
-        ...prev,
-        uploadStatus: "completing",
-      }));
-
-      // Complete upload
-      let completeResult: any;
-      try {
-        const completeResponse = await fetch(`${BACKEND_URL}/upload/complete`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ uploadId }),
-        });
-
-        completeResult = await completeResponse.json();
-      } catch (error: any) {
-        // Se receber erro 524 (timeout do gateway), verificar status do servidor
-        // O upload pode ter sido completado mesmo com timeout
-        if (error.message?.includes("524") || error.message?.includes("timeout")) {
-          console.log("Gateway timeout (524), checking server status...");
-          // Aguardar um pouco e verificar status
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          
-          const statusResponse = await fetch(
-            `${BACKEND_URL}/upload/status/${uploadId}`
-          );
-          if (statusResponse.ok) {
-            const statusResult = await statusResponse.json();
-            if (statusResult.success && statusResult.isComplete) {
-              // Upload foi completado, usar status do servidor
-              completeResult = {
-                success: true,
-                path: statusResult.finalPath,
-                processing: statusResult.processing,
-              };
-            } else {
-              throw new Error("Upload not complete on server");
-            }
-          } else {
-            throw error;
-          }
-        } else {
-          throw error;
+      const finalFilePath = await uploadFile(
+        file,
+        { type: step1.contentType, folder: folderName, fileName },
+        {
+          signal: controller.signal,
+          onFinalizing: () =>
+            setState((prev) => ({ ...prev, uploadStatus: "completing" })),
+          onProgress: (p) =>
+            setState((prev) => ({
+              ...prev,
+              progress: p.percentage,
+              timeElapsed: p.timeElapsed,
+              timeRemaining: p.timeRemaining,
+              uploadSpeed: p.uploadSpeed,
+            })),
         }
-      }
-
-      // Se está processando, aguardar processamento completar
-      if (completeResult.processing) {
-        let attempts = 0;
-        const maxAttempts = 30; // 30 tentativas (30 segundos máximo)
-        
-        while (completeResult.processing && attempts < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          
-          const statusResponse = await fetch(
-            `${BACKEND_URL}/upload/status/${uploadId}`
-          );
-          if (statusResponse.ok) {
-            const statusResult = await statusResponse.json();
-            if (statusResult.success) {
-              if (statusResult.finalPath) {
-                completeResult.path = statusResult.finalPath;
-                completeResult.processing = false;
-                break;
-              }
-              if (statusResult.processingError) {
-                throw new Error(statusResult.processingError);
-              }
-            }
-          }
-          attempts++;
-        }
-        
-        if (completeResult.processing) {
-          throw new Error("Processing timeout - file may still be processing");
-        }
-      }
-
-      if (!completeResult.success) {
-        throw new Error(completeResult.error || "Failed to complete upload");
-      }
-
-      // Clear session state
-      stateManager.clear();
-
-      // Construir o caminho completo do arquivo
-      let finalFilePath = destinationPath;
-      if (folderName) {
-        finalFilePath = `${destinationPath}/${folderName}`;
-      }
-      finalFilePath = `${finalFilePath}/${fileName}`;
+      );
 
       setState((prev) => ({
         ...prev,
         progress: 100,
         isUploading: false,
         uploadStatus: "success",
-        finalFilePath: completeResult.path || finalFilePath,
-        // Manter o fileName no step3 para exibir na tela de sucesso
-        step3: {
-          ...prev.step3,
-          fileName: fileName,
-        },
+        finalFilePath,
       }));
-
-      if (onComplete) {
-        onComplete();
-      }
+      onComplete?.();
     } catch (error) {
-      if (chunker) {
-        chunker.cancel();
-      }
-
+      if (controller.signal.aborted) return;
       setState((prev) => ({
         ...prev,
         isUploading: false,
         uploadStatus: "error",
+        error: error instanceof Error ? error.message : "Upload failed",
       }));
-
-      const errorMessage =
-        error instanceof Error ? error.message : "Upload failed";
-      setError(errorMessage);
     }
   };
 
@@ -479,9 +293,7 @@ export function FileUpload({
                       : state.step1.selectedExistingFolder ||
                         state.step1.subFolderName.trim()
                   }
-                  destinationPath={getFinalDestinationPath()}
                   contentType={state.step1.contentType}
-                  onComplete={onComplete}
                   onReset={handleReset}
                 />
               ) : (
@@ -510,7 +322,6 @@ export function FileUpload({
               isUploading={state.isUploading}
               uploadStatus={state.uploadStatus}
               timeElapsed={state.timeElapsed}
-              timeRemaining={state.timeRemaining}
               uploadSpeed={state.uploadSpeed}
               finalFilePath={state.finalFilePath}
               onDataChange={updateStep3Data}

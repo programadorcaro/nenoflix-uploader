@@ -6,20 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import confetti from "canvas-confetti";
 import type { Step3Data, Step2Data, Step1Data } from "./types";
-
-function formatTime(seconds: number): string {
-  if (seconds < 60) {
-    return `${Math.round(seconds)}s`;
-  } else if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    return `${minutes}m ${secs}s`;
-  } else {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
-  }
-}
+import { estimateUploadTime, formatFileSize, formatTime, mediaLocation } from "./utils/format";
 
 interface Step3Props {
   step1Data: Step1Data;
@@ -30,7 +17,6 @@ interface Step3Props {
   isUploading: boolean;
   uploadStatus: "idle" | "uploading" | "completing" | "success" | "error";
   timeElapsed?: number;
-  timeRemaining?: number | null;
   uploadSpeed?: number;
   finalFilePath?: string;
   onDataChange: (data: Partial<Step3Data>) => void;
@@ -47,7 +33,6 @@ export function Step3({
   isUploading,
   uploadStatus,
   timeElapsed,
-  timeRemaining,
   uploadSpeed,
   finalFilePath,
   onDataChange,
@@ -68,57 +53,11 @@ export function Step3({
     step1Data.subFolderName,
   ]);
 
-  // Formata o caminho para exibir apenas a parte relevante
-  const displayPath = React.useMemo(() => {
-    if (!finalFilePath) return "";
-
-    // Extrair apenas a parte relevante baseado no tipo de conteúdo
-    if (step1Data.contentType === "movies") {
-      // Para filmes: apenas o nome da pasta base (Movies)
-      const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
-      const moviesIndex = pathParts.findIndex(
-        (part) => part.toLowerCase() === "movies"
-      );
-      if (moviesIndex !== -1) {
-        return `/${pathParts[moviesIndex]}`;
-      }
-      // Se não encontrar "Movies", pega a última pasta antes do arquivo
-      if (pathParts.length >= 2) {
-        return `/${pathParts[pathParts.length - 2]}`;
-      }
-      return finalFilePath;
-    } else if (
-      step1Data.contentType === "series" ||
-      step1Data.contentType === "animes"
-    ) {
-      // Para séries/animes: pasta base + pasta criada
-      const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
-      const contentType =
-        step1Data.contentType === "series" ? "Series" : "Animes";
-      const contentTypeIndex = pathParts.findIndex(
-        (part) =>
-          part === contentType ||
-          part === contentType.toLowerCase() ||
-          part.toLowerCase() === contentType.toLowerCase()
-      );
-
-      if (contentTypeIndex !== -1 && folderName) {
-        // Retorna /Animes/{pasta} ou /Series/{pasta}
-        return `/${pathParts[contentTypeIndex]}/${folderName}`;
-      } else if (contentTypeIndex !== -1) {
-        // Se não houver folderName, apenas a pasta base
-        return `/${pathParts[contentTypeIndex]}`;
-      }
-      // Fallback: pega as duas últimas pastas antes do arquivo
-      if (pathParts.length >= 2) {
-        const lastTwoParts = pathParts.slice(-2);
-        return `/${lastTwoParts[0]}`;
-      }
-      return finalFilePath;
-    }
-
-    return finalFilePath;
-  }, [finalFilePath, step1Data.contentType, folderName]);
+  // Short location: "/Movies" or "/Series/<folder>"
+  const displayPath =
+    finalFilePath && step1Data.contentType
+      ? mediaLocation(finalFilePath, step1Data.contentType)
+      : "";
 
   // Copia o fileName do Step 2 para o Step 3 quando entra no Step 3
   // O nome já vem do Step 2 através do handleNextStep, mas garantimos aqui também
@@ -182,35 +121,6 @@ export function Step3({
     }
   }, [uploadStatus]);
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
-  };
-
-  const estimateUploadTime = (
-    fileSizeBytes: number,
-    speedMBps?: number
-  ): string => {
-    const averageSpeedMbps = speedMBps || 10;
-    const speedBytesPerSecond = (averageSpeedMbps * 1024 * 1024) / 8;
-    const seconds = fileSizeBytes / speedBytesPerSecond;
-
-    if (seconds < 60) {
-      return `${Math.round(seconds)}s`;
-    } else if (seconds < 3600) {
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = Math.round(seconds % 60);
-      return `${minutes}m ${remainingSeconds}s`;
-    } else {
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      return `${hours}h ${minutes}m`;
-    }
-  };
-
   // Tempo estimado fixo, calculado apenas uma vez quando temos velocidade confiável
   const [fixedEstimatedTime, setFixedEstimatedTime] = React.useState<
     string | null
@@ -227,10 +137,9 @@ export function Step3({
       timeElapsed >= 2 &&
       !fixedEstimatedTime
     ) {
-      const speedMBps = uploadSpeed / 1024 / 1024;
       const estimated = estimateUploadTime(
         step2Data.selectedFile.size,
-        speedMBps
+        uploadSpeed
       );
       setFixedEstimatedTime(estimated);
     }
@@ -257,10 +166,7 @@ export function Step3({
       // Usa o tempo estimado fixo se disponível, caso contrário calcula com velocidade padrão
       const estimatedTime =
         fixedEstimatedTime ||
-        estimateUploadTime(
-          step2Data.selectedFile.size,
-          undefined // Usa velocidade padrão de 10 MB/s se ainda não tiver velocidade confiável
-        );
+        estimateUploadTime(step2Data.selectedFile.size);
       items.push({ label: "Tempo estimado", value: estimatedTime });
     }
 
@@ -280,13 +186,13 @@ export function Step3({
             <div className="relative w-full max-w-32 aspect-square mx-auto">
               <Image
                 src="/sucess.jpg"
-                alt="Erro"
+                alt="Upload concluído"
                 width={400}
                 height={300}
                 className="w-full h-auto object-cover rounded-2xl shadow-2xl"
                 priority
               />
-              <div className="absolute inset-0 bg-destructive/10 rounded-2xl blur-xl -z-10" />
+              <div className="absolute inset-0 bg-primary/10 rounded-2xl blur-xl -z-10" />
             </div>
           </div>
           <div className="space-y-6 max-w-2xl mx-auto">

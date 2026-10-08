@@ -1,854 +1,248 @@
-import { Elysia } from "elysia";
-import { node } from "@elysiajs/node";
-import { cors } from "@elysiajs/cors";
-import { writeFile, mkdir, readdir, copyFile, unlink } from "fs/promises";
-import { createWriteStream } from "fs";
-import { join, extname, isAbsolute, resolve, normalize, dirname } from "path";
-import { existsSync, statSync, accessSync, constants } from "fs";
-import { homedir, userInfo } from "os";
-import { randomUUID } from "crypto";
-import { uploadManager } from "./upload-manager.js";
-import { writeChunk, validateFileIntegrity } from "./chunk-handler.js";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { open, mkdir, readdir, rename, rm, rmdir, stat, type FileHandle } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { dirname, extname, join } from "node:path";
 
-const PORT = 8098;
-const DEFAULT_TMP_DIR = "tmp";
-const MAX_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB máximo (reduzido de 200MB para melhorar em conexões lentas)
-
+const PORT = Number(process.env.PORT ?? 8098);
+const MEDIA_ROOT = process.env.MEDIA_ROOT ?? "/Volumes/MediaNAS/Jellyfin/media";
+const CHUNK_SIZE = 16 * 1024 * 1024;
+const STALE_MS = 24 * 60 * 60 * 1000;
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
+const TYPE_DIRS: Record<string, string> = { movies: "Movies", series: "Series", animes: "Animes" };
 
-function calculateOptimalChunkSize(totalSize: number): number {
-  // Configuração adaptativa baseada no tamanho do arquivo
-  // Criamos mais chunks menores para reduzir risco de timeout e melhorar recuperação
+interface Session {
+  fh: FileHandle;
+  tmpPath: string;
+  finalPath: string;
+  size: number;
+  totalChunks: number;
+  received: Set<number>;
+  writing: Set<number>;
+  touched: number;
+  syncing: boolean;
+}
+const sessions = new Map<string, Session>();
 
-  let targetChunks: number;
-  let minChunkSize: number;
-
-  if (totalSize < 500 * 1024 * 1024) {
-    // Arquivos pequenos (< 500MB): 100 chunks, mínimo 1MB
-    targetChunks = 100;
-    minChunkSize = 1 * 1024 * 1024;
-  } else if (totalSize < 5 * 1024 * 1024 * 1024) {
-    // Arquivos médios (500MB - 5GB): 200 chunks, mínimo 2MB
-    targetChunks = 200;
-    minChunkSize = 2 * 1024 * 1024;
-  } else {
-    // Arquivos grandes (> 5GB): 300 chunks, mínimo 5MB
-    targetChunks = 300;
-    minChunkSize = 5 * 1024 * 1024;
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
   }
-
-  const idealChunkSize = Math.floor(totalSize / targetChunks);
-
-  if (idealChunkSize < minChunkSize) {
-    return minChunkSize;
-  }
-
-  if (idealChunkSize > MAX_CHUNK_SIZE) {
-    return MAX_CHUNK_SIZE;
-  }
-
-  // Round to nearest MB for cleaner numbers
-  return Math.floor(idealChunkSize / (1024 * 1024)) * 1024 * 1024;
 }
 
-// Helper function to expand environment variables in paths
-function expandEnvVars(path: string): string {
-  // Expand $HOME or ${HOME}
-  path = path.replace(/\$HOME|\$\{HOME\}/g, homedir());
+// Strip characters that are unsafe in file names; folders also lose dots.
+const cleanName = (s: unknown, isFolder = false) =>
+  String(s ?? "").replace(isFolder ? /[<>:"/\\|?*.\x00-\x1F]/g : /[<>:"/\\|?*\x00-\x1F]/g, "").trim();
 
-  // Expand $USER or ${USER}
-  const username = userInfo().username;
-  path = path.replace(/\$USER|\$\{USER\}/g, username);
+const typeDir = (type: unknown) => {
+  const dir = TYPE_DIRS[String(type)];
+  if (!dir) throw new HttpError(400, "Invalid type");
+  return join(MEDIA_ROOT, dir);
+};
 
-  // Expand any other environment variables
-  path = path.replace(
-    /\$\{([^}]+)\}|\$([a-zA-Z_][a-zA-Z0-9_]*)/g,
-    (match, braced, unbraced) => {
-      const varName = braced || unbraced;
-      const value = process.env[varName];
-      return value || match; // Return original if variable not found
-    }
-  );
+const exists = (p: string) => stat(p).then(() => true, () => false);
 
-  return path;
-}
+const send = (res: ServerResponse, status: number, body: unknown) => {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+};
 
-// Helper function to move files, handling cross-device scenarios
-async function moveFile(source: string, destination: string): Promise<void> {
+const readJson = async (req: IncomingMessage) => {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > 64 * 1024) throw new HttpError(413, "Body too large");
+  }
   try {
-    const { rename } = await import("fs/promises");
-    await rename(source, destination);
-  } catch (error: any) {
-    // If rename fails due to cross-device link (EXDEV), use copy + unlink
-    if (error.code === "EXDEV") {
-      await copyFile(source, destination);
-      await unlink(source);
-    } else {
-      throw error;
-    }
+    return JSON.parse(raw || "{}") as Record<string, unknown>;
+  } catch {
+    throw new HttpError(400, "Invalid JSON");
   }
-}
+};
 
-// Helper function to safely create directories, checking parent permissions
-async function ensureDirectoryExists(dirPath: string): Promise<void> {
-  if (existsSync(dirPath)) {
-    // Check if it's actually a directory
-    const stats = statSync(dirPath);
-    if (!stats.isDirectory()) {
-      throw new Error(`Path exists but is not a directory: ${dirPath}`);
-    }
-    return;
+const getSession = (id: string) => {
+  const s = sessions.get(id);
+  if (!s) throw new HttpError(404, "Upload not found");
+  s.touched = Date.now();
+  return s;
+};
+
+const missingChunks = (s: Session) => {
+  const missing: number[] = [];
+  for (let i = 0; i < s.totalChunks; i++) if (!s.received.has(i)) missing.push(i);
+  return missing;
+};
+
+const dropSession = async (id: string, s: Session) => {
+  sessions.delete(id);
+  await s.fh.close().catch(() => {});
+  await rm(s.tmpPath, { force: true });
+  // Remove a series/anime folder created for this upload if it is now empty.
+  const dir = dirname(s.tmpPath);
+  if (!Object.values(TYPE_DIRS).some((t) => join(MEDIA_ROOT, t) === dir)) await rmdir(dir).catch(() => {});
+};
+
+async function init(req: IncomingMessage) {
+  const body = await readJson(req);
+  const size = Number(body.size);
+  if (!Number.isSafeInteger(size) || size <= 0) throw new HttpError(400, "Invalid size");
+
+  const ext = extname(String(body.originalFileName || body.fileName || "")).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    throw new HttpError(400, `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`);
   }
-
-  // Check if parent directory exists and is writable
-  const parentDir = dirname(dirPath);
-
-  // Don't try to create root directory itself
-  if (parentDir === dirPath) {
-    throw new Error(
-      `Cannot create root directory: ${dirPath}. ` +
-        `Please ensure the directory path is valid.`
-    );
-  }
-
-  // Special handling for root-level directories (like /mnt)
-  if (parentDir === "/") {
-    // Don't check write permissions on / as it may be read-only (EROFS)
-    // Just try to create the directory directly
-    try {
-      await mkdir(dirPath, { recursive: false });
-      return;
-    } catch (error: any) {
-      if (error.code === "EACCES" || error.code === "EPERM") {
-        throw new Error(
-          `Permission denied: Cannot create directory ${dirPath}. ` +
-            `Please ensure you have permissions to create directories in ${parentDir}. ` +
-            `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
-        );
-      } else if (error.code === "EROFS") {
-        throw new Error(
-          `Read-only file system: Cannot create directory ${dirPath}. ` +
-            `The root filesystem (/) is mounted as read-only. ` +
-            `Please ensure ${dirPath} exists before running the application, or remount the filesystem as read-write. ` +
-            `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
-        );
-      } else if (error.code === "ENOENT") {
-        throw new Error(
-          `Parent directory does not exist: ${parentDir}. ` +
-            `Please ensure the parent directory exists before creating ${dirPath}.`
-        );
-      }
-      throw error;
-    }
-  }
-
-  if (!existsSync(parentDir)) {
-    // Check if parent is a root-level directory (like /mnt)
-    // If so, don't try to create it as it may be on a read-only filesystem
-    const parentParentDir = dirname(parentDir);
-    if (parentParentDir === "/") {
-      // Parent is a root-level directory that doesn't exist
-      // Don't try to create it, just return a clear error
-      throw new Error(
-        `Parent directory does not exist: ${parentDir}. ` +
-          `This directory is on the root filesystem which may be read-only. ` +
-          `Please create it manually before running the application: ` +
-          `sudo mkdir -p ${parentDir} && sudo chown $USER:$USER ${parentDir}`
-      );
-    }
-    // Recursively ensure parent exists first (for non-root-level directories)
-    await ensureDirectoryExists(parentDir);
-  } else {
-    // Check if parent is writable (skip for root directory as it may be read-only)
-    try {
-      accessSync(parentDir, constants.W_OK);
-    } catch (error: any) {
-      // Handle read-only filesystem error
-      if (error.code === "EROFS") {
-        // If parent is read-only, check if it's a root-level directory
-        // If so, we can still try to create subdirectories (they might be on a different mount)
-        const parentParentDir = dirname(parentDir);
-        if (parentParentDir === "/") {
-          // Parent is a root-level directory that's read-only
-          // We can still try to create the child directory (it might be on a different filesystem)
-          // The mkdir below will fail with a clearer error if it can't create
-        } else {
-          throw new Error(
-            `Read-only file system: Cannot create directory in ${parentDir}. ` +
-              `The filesystem is mounted as read-only. ` +
-              `Please ensure ${dirPath} exists before running the application.`
-          );
-        }
-      } else {
-        throw new Error(
-          `Permission denied: Cannot create directory in ${parentDir}. ` +
-            `Please ensure the parent directory exists and is writable. ` +
-            `You may need to run: sudo chmod 755 ${parentDir} or check ownership. ` +
-            `Original error: ${error.message}`
-        );
-      }
-    }
-  }
-
-  // Now create the directory
-  try {
-    await mkdir(dirPath, { recursive: false });
-  } catch (error: any) {
-    if (error.code === "EEXIST") {
-      // Directory was created by another process, verify it exists
-      if (!existsSync(dirPath)) {
-        throw error;
-      }
-    } else if (error.code === "EACCES" || error.code === "EPERM") {
-      throw new Error(
-        `Permission denied: Cannot create directory ${dirPath}. ` +
-          `Please check permissions on parent directory ${parentDir}.`
-      );
-    } else if (error.code === "EROFS") {
-      throw new Error(
-        `Read-only file system: Cannot create directory ${dirPath}. ` +
-          `The filesystem containing ${parentDir} is mounted as read-only. ` +
-          `Please ensure ${dirPath} exists before running the application, or remount the filesystem as read-write. ` +
-          `You may need to run: sudo mkdir -p ${dirPath} && sudo chown $USER:$USER ${dirPath}`
-      );
-    } else if (error.code === "ENOENT") {
-      throw new Error(
-        `Parent directory does not exist: ${parentDir}. ` +
-          `Please ensure the parent directory exists before creating ${dirPath}.`
-      );
-    } else {
-      throw error;
-    }
-  }
-}
-
-function sanitizeFileName(fileName: string): string {
-  // Remove apenas caracteres perigosos para sistema de arquivos
-  // Permite: letras, números, espaços, pontos, underscores, hífens
-  // Remove: /, \, :, *, ?, ", <, >, |, e caracteres de controle
-  return fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "").trim();
-}
-
-function sanitizeFolderName(folderName: string | null): string {
-  if (!folderName) return "";
-  // Remove apenas caracteres perigosos para sistema de arquivos
-  // Permite: letras, números, espaços, underscores, hífens
-  // Remove: /, \, :, *, ?, ", <, >, |, ., e caracteres de controle
-  return folderName.replace(/[<>:"/\\|?*.\x00-\x1F]/g, "").trim();
-}
-
-function resolveDestinationPath(destinationPath: string): string {
-  let resolved = destinationPath.trim();
-  resolved = expandEnvVars(resolved);
-
-  if (resolved.startsWith("~/")) {
-    resolved = join(homedir(), resolved.slice(2));
-  } else if (resolved === "~") {
-    resolved = homedir();
-  } else if (isAbsolute(resolved)) {
-    resolved = normalize(resolved);
-  } else {
-    resolved = resolve(process.cwd(), resolved);
-  }
-
-  return normalize(resolved);
-}
-
-function buildTargetPath(
-  destinationPath: string,
-  folderName: string,
-  fileName: string
-): { targetDir: string; targetPath: string } {
-  const targetDir = folderName
-    ? join(destinationPath, folderName)
-    : destinationPath;
-  const targetPath = join(targetDir, fileName);
-  return { targetDir, targetPath };
-}
-
-const app = new Elysia({ adapter: node() })
-  .use(
-    cors({
-      // TODO: Change to the frontend URL
-      origin: "*",
-      methods: ["GET", "POST", "OPTIONS"],
-      allowedHeaders: ["Content-Type"],
-    })
-  )
-  .get("/", () => "Hello Elysia")
-  .get("/folders", async (context) => {
-    try {
-      const path = (context.query.path as string) || "";
-
-      if (!path) {
-        return {
-          success: false,
-          error: "Path parameter is required",
-        };
-      }
-
-      let resolvedPath = path.trim();
-
-      // Expand environment variables first (e.g., $HOME, $USER)
-      resolvedPath = expandEnvVars(resolvedPath);
-
-      if (resolvedPath.startsWith("~/")) {
-        resolvedPath = join(homedir(), resolvedPath.slice(2));
-      } else if (resolvedPath === "~") {
-        resolvedPath = homedir();
-      } else if (isAbsolute(resolvedPath)) {
-        resolvedPath = normalize(resolvedPath);
-      } else {
-        resolvedPath = resolve(process.cwd(), resolvedPath);
-      }
-
-      resolvedPath = normalize(resolvedPath);
-
-      if (!existsSync(resolvedPath)) {
-        return {
-          success: true,
-          folders: [],
-        };
-      }
-
-      const entries = await readdir(resolvedPath);
-      const folders = entries.filter((entry) => {
-        const entryPath = join(resolvedPath, entry);
-        try {
-          return statSync(entryPath).isDirectory();
-        } catch {
-          return false;
-        }
-      });
-
-      return {
-        success: true,
-        folders: folders.sort(),
-      };
-    } catch (error) {
-      console.error("List folders error:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  })
-  .post("/upload/init", async (context) => {
-    try {
-      const body = (await context.request.json()) as {
-        fileName?: string;
-        folderName?: string | null;
-        destinationPath?: string;
-        totalSize?: number;
-        chunkSize?: number;
-        originalFileName?: string;
-      };
-      const {
-        fileName,
-        folderName,
-        destinationPath,
-        totalSize,
-        chunkSize,
-        originalFileName,
-      } = body;
-
-      if (!totalSize || totalSize <= 0) {
-        return {
-          success: false,
-          error: "Invalid totalSize",
-        };
-      }
-
-      const optimalChunkSize =
-        chunkSize || calculateOptimalChunkSize(totalSize);
-
-      if (!fileName || !totalSize) {
-        return {
-          success: false,
-          error: "Missing required fields: fileName, totalSize",
-        };
-      }
-
-      const sanitizedFolderName = sanitizeFolderName(folderName ?? null);
-
-      // Get extension from original file name if provided, otherwise from fileName
-      const originalExtension = originalFileName
-        ? extname(originalFileName).toLowerCase()
-        : extname(fileName).toLowerCase();
-
-      if (!ALLOWED_EXTENSIONS.includes(originalExtension)) {
-        return {
-          success: false,
-          error: `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`,
-        };
-      }
-
-      let sanitizedFileName = sanitizeFileName(fileName);
-      // Always append the original extension to ensure file has extension
-      if (!sanitizedFileName.toLowerCase().endsWith(originalExtension)) {
-        sanitizedFileName = sanitizedFileName + originalExtension;
-      }
-
-      const resolvedDestinationPath = resolveDestinationPath(
-        destinationPath || DEFAULT_TMP_DIR
-      );
-      const { targetDir, targetPath } = buildTargetPath(
-        resolvedDestinationPath,
-        sanitizedFolderName,
-        sanitizedFileName
-      );
-
-      await ensureDirectoryExists(targetDir);
-
-      const uploadId = randomUUID();
-      const tempFilePath = join(
-        process.cwd(),
-        DEFAULT_TMP_DIR,
-        `upload_${uploadId}_${sanitizedFileName}`
-      );
-
-      await ensureDirectoryExists(dirname(tempFilePath));
-
-      const session = uploadManager.createSession(
-        uploadId,
-        sanitizedFileName,
-        sanitizedFolderName,
-        resolvedDestinationPath,
-        totalSize,
-        optimalChunkSize,
-        tempFilePath
-      );
-
-      return {
-        success: true,
-        uploadId: session.uploadId,
-        totalChunks: session.totalChunks,
-        chunkSize: session.chunkSize,
-      };
-    } catch (error) {
-      console.error("Upload init error:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  })
-  .post("/upload/chunk", async (context) => {
-    try {
-      const formData = await context.request.formData();
-      const uploadId = formData.get("uploadId") as string | null;
-      const chunkIndexStr = formData.get("chunkIndex") as string | null;
-      const chunkData = formData.get("chunk") as File | null;
-
-      if (!uploadId || chunkIndexStr === null || !chunkData) {
-        return {
-          success: false,
-          error: "Missing required fields: uploadId, chunkIndex, chunk",
-        };
-      }
-
-      const chunkIndex = parseInt(chunkIndexStr, 10);
-      if (isNaN(chunkIndex) || chunkIndex < 0) {
-        return {
-          success: false,
-          error: "Invalid chunkIndex",
-        };
-      }
-
-      const session = uploadManager.getSession(uploadId);
-      if (!session) {
-        return {
-          success: false,
-          error: "Upload session not found",
-        };
-      }
-
-      if (session.receivedChunks.has(chunkIndex)) {
-        return {
-          success: true,
-          chunkIndex,
-          message: "Chunk already received",
-        };
-      }
-
-      const chunkStream = chunkData.stream();
-      const result = await writeChunk(session, chunkIndex, chunkStream);
-
-      if (result.success) {
-        uploadManager.markChunkReceived(uploadId, chunkIndex);
-      }
-
-      return {
-        success: result.success,
-        chunkIndex: result.chunkIndex,
-        bytesWritten: result.bytesWritten,
-        error: result.error,
-      };
-    } catch (error) {
-      console.error("Chunk upload error:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  })
-  .post("/upload/complete", async (context) => {
-    try {
-      const body = (await context.request.json()) as {
-        uploadId?: string;
-      };
-      const { uploadId } = body;
-
-      if (!uploadId) {
-        return {
-          success: false,
-          error: "Missing required field: uploadId",
-        };
-      }
-
-      const session = uploadManager.getSession(uploadId);
-      if (!session) {
-        return {
-          success: false,
-          error: "Upload session not found",
-        };
-      }
-
-      if (!uploadManager.isComplete(uploadId)) {
-        const status = uploadManager.getSessionStatus(uploadId);
-        return {
-          success: false,
-          error: "Upload not complete",
-          missingChunks: status?.missingChunks || [],
-        };
-      }
-
-      // Se já está processando, retornar status atual
-      if (session.processing) {
-        const status = uploadManager.getSessionStatus(uploadId);
-        return {
-          success: status?.finalPath ? true : false,
-          message: status?.finalPath
-            ? "File processing completed"
-            : "File is being processed",
-          path: status?.finalPath,
-          filePath: status?.finalPath, // Manter compatibilidade
-          processing: true,
-          error: status?.processingError,
-        };
-      }
-
-      // Se já foi processado, retornar resultado
-      if (session.finalPath) {
-        return {
-          success: true,
-          message: "File uploaded successfully",
-          path: session.finalPath,
-          filePath: session.finalPath, // Manter compatibilidade
-        };
-      }
-
-      // Marcar como processando e iniciar processamento em background
-      session.processing = true;
-
-      // Retornar imediatamente para evitar timeout do gateway
-      // Processar em background
-      (async () => {
-        try {
-          const { targetDir, targetPath } = buildTargetPath(
-            session.destinationPath,
-            session.folderName,
-            session.fileName
-          );
-
-          await ensureDirectoryExists(targetDir);
-
-          const tmpBasePath = resolve(process.cwd(), DEFAULT_TMP_DIR);
-          const isDestinationTmp = session.destinationPath === tmpBasePath;
-
-          // Validate integrity before moving
-          const integrity = await validateFileIntegrity(session);
-          if (!integrity.valid) {
-            console.error(
-              `File integrity check failed. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`
-            );
-            session.processingError = `File size mismatch. Expected: ${integrity.expectedSize}, Got: ${integrity.actualSize}`;
-            session.processing = false;
-            return;
-          }
-
-          // If destination is tmp and paths match, no need to move
-          if (isDestinationTmp && session.tempFilePath === targetPath) {
-            // File is already in the right place
-            session.finalPath = targetPath;
-          } else {
-            // Use streaming copy for large files instead of move
-            // This is more reliable for cross-device scenarios
-            try {
-              const { createReadStream } = await import("fs");
-              const { pipeline } = await import("stream/promises");
-              const readStream = createReadStream(session.tempFilePath);
-              const writeStream = createWriteStream(targetPath);
-
-              await pipeline(readStream, writeStream);
-
-              session.finalPath = targetPath;
-
-              // Delete temp file after successful copy
-              await unlink(session.tempFilePath).catch(() => {
-                // Ignore if already deleted
-              });
-            } catch (error: any) {
-              console.error(
-                "Streaming copy failed, falling back to move:",
-                error
-              );
-              // Fallback to moveFile if copy fails
-              if (error.code !== "ENOENT") {
-                await moveFile(session.tempFilePath, targetPath);
-                session.finalPath = targetPath;
-              } else {
-                throw error;
-              }
-            }
-          }
-
-          // Always clean up temp file if it still exists (in case of errors or edge cases)
-          try {
-            if (existsSync(session.tempFilePath)) {
-              await unlink(session.tempFilePath).catch(() => {
-                // Ignore if already deleted
-              });
-            }
-          } catch {
-            // Ignore cleanup errors
-          }
-
-          // Clean up temp directory if empty (only for this user's upload)
-          try {
-            const tempDir = dirname(session.tempFilePath);
-            if (existsSync(tempDir) && tempDir !== tmpBasePath) {
-              const entries = await readdir(tempDir);
-              if (entries.length === 0) {
-                const { rmdir } = await import("fs/promises");
-                await rmdir(tempDir).catch(() => {
-                  // Ignore if directory not empty or other error
-                });
-              }
-            }
-
-            // Also try to remove base tmp directory if empty (only if no other uploads)
-            if (existsSync(tmpBasePath)) {
-              const baseEntries = await readdir(tmpBasePath);
-              if (baseEntries.length === 0) {
-                const { rmdir } = await import("fs/promises");
-                await rmdir(tmpBasePath).catch(() => {
-                  // Ignore if directory not empty or other error
-                });
-              }
-            }
-          } catch {
-            // Ignore cleanup errors
-          }
-
-          session.processing = false;
-        } catch (error: any) {
-          console.error("Error processing upload completion:", error);
-          session.processingError =
-            error instanceof Error ? error.message : "Unknown error";
-          session.processing = false;
-        }
-      })();
-
-      // Retornar imediatamente
-      return {
-        success: true,
-        message: "Upload complete, processing file...",
-        processing: true,
-        path: undefined, // Será preenchido quando processamento completar
-      };
-    } catch (error) {
-      console.error("Upload complete error:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  })
-  .get("/upload/status/:uploadId", async (context) => {
-    try {
-      const uploadId = context.params.uploadId;
-      const status = uploadManager.getSessionStatus(uploadId);
-
-      if (!status) {
-        return {
-          success: false,
-          error: "Upload session not found",
-        };
-      }
-
-      return {
-        success: true,
-        ...status,
-      };
-    } catch (error) {
-      console.error("Upload status error:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  })
-  .post("/upload", async (context) => {
-    try {
-      const formData = await context.request.formData();
-      const folderName = formData.get("folderName") as string | null;
-      const fileName = formData.get("fileName") as string | null;
-      const file = formData.get("file") as File | null;
-      const destinationPath =
-        (formData.get("destinationPath") as string | null) || DEFAULT_TMP_DIR;
-
-      if (!fileName || !file) {
-        return {
-          success: false,
-          error: "Missing required fields: fileName or file",
-        };
-      }
-
-      // folderName é opcional (usado apenas para séries/animes)
-      const sanitizedFolderName = sanitizeFolderName(folderName ?? null);
-
-      const fileExtension = extname(file.name).toLowerCase();
-      if (!ALLOWED_EXTENSIONS.includes(fileExtension)) {
-        return {
-          success: false,
-          error: `Invalid file format. Allowed formats: ${ALLOWED_EXTENSIONS.join(", ")}`,
-        };
-      }
-      let sanitizedFileName = sanitizeFileName(fileName);
-
-      // Add extension from original file if not present in fileName
-      if (!sanitizedFileName.toLowerCase().endsWith(fileExtension)) {
-        sanitizedFileName = sanitizedFileName + fileExtension;
-      }
-
-      // Handle destination path - support absolute paths, ~ expansion, and env vars
-      let resolvedDestinationPath = destinationPath.trim();
-
-      // Expand environment variables first (e.g., $HOME, $USER)
-      resolvedDestinationPath = expandEnvVars(resolvedDestinationPath);
-
-      // Expand ~ to home directory
-      if (resolvedDestinationPath.startsWith("~/")) {
-        resolvedDestinationPath = join(
-          homedir(),
-          resolvedDestinationPath.slice(2)
-        );
-      } else if (resolvedDestinationPath === "~") {
-        resolvedDestinationPath = homedir();
-      } else if (isAbsolute(resolvedDestinationPath)) {
-        // Already absolute, normalize to resolve .. and .
-        resolvedDestinationPath = normalize(resolvedDestinationPath);
-      } else {
-        // Relative path, resolve from process.cwd()
-        resolvedDestinationPath = resolve(
-          process.cwd(),
-          resolvedDestinationPath
-        );
-      }
-
-      // Normalize the path to prevent path traversal attacks
-      resolvedDestinationPath = normalize(resolvedDestinationPath);
-
-      if (!sanitizedFileName || !resolvedDestinationPath) {
-        return {
-          success: false,
-          error: "Invalid file name or destination path",
-        };
-      }
-
-      // Se folderName estiver vazio, arquivo vai direto no destinationPath
-      // Caso contrário, cria pasta intermediária (para séries/animes)
-      const targetDir = sanitizedFolderName
-        ? join(resolvedDestinationPath, sanitizedFolderName)
-        : resolvedDestinationPath;
-      const targetPath = join(targetDir, sanitizedFileName);
-
-      // Check if destination is the tmp folder
-      const tmpBasePath = resolve(process.cwd(), DEFAULT_TMP_DIR);
-      const isDestinationTmp = resolvedDestinationPath === tmpBasePath;
-
-      let tmpPath: string | null = null;
-      let tmpDir: string | null = null;
-
-      if (!isDestinationTmp) {
-        // Use tmp folder for staging only if destination is not tmp
-        tmpDir = sanitizedFolderName
-          ? join(process.cwd(), DEFAULT_TMP_DIR, sanitizedFolderName)
-          : join(process.cwd(), DEFAULT_TMP_DIR);
-        tmpPath = join(tmpDir, sanitizedFileName);
-
-        // Create temporary directory for staging
-        await ensureDirectoryExists(tmpDir);
-      }
-
-      // Create final destination directory
-      await ensureDirectoryExists(targetDir);
-
-      const arrayBuffer = await file.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      if (tmpPath && !isDestinationTmp) {
-        // Write to temporary location first, then move
-        await writeFile(tmpPath, buffer);
-        await moveFile(tmpPath, targetPath);
-
-        // Clean up: remove tmp directory if empty
-        try {
-          if (tmpDir && existsSync(tmpDir)) {
-            const { readdir, rmdir } = await import("fs/promises");
-            const entries = await readdir(tmpDir);
-            // Only remove if directory is empty
-            if (entries.length === 0) {
-              await rmdir(tmpDir);
-              // Also try to remove parent tmp directory if empty
-              const tmpBaseDir = join(process.cwd(), DEFAULT_TMP_DIR);
-              if (existsSync(tmpBaseDir)) {
-                try {
-                  const baseEntries = await readdir(tmpBaseDir);
-                  if (baseEntries.length === 0) {
-                    await rmdir(tmpBaseDir);
-                  }
-                } catch {
-                  // Ignore if directory not empty or other error
-                }
-              }
-            }
-          }
-        } catch {
-          // Ignore cleanup errors
-        }
-      } else {
-        // Write directly to final destination if destination is tmp
-        await writeFile(targetPath, buffer);
-      }
-
-      return {
-        success: true,
-        message: "File uploaded successfully",
-        path: targetPath,
-      };
-    } catch (error) {
-      console.error("Upload error:", error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-    }
-  })
-  .listen({
-    port: PORT,
-    hostname: "0.0.0.0",
+  let name = cleanName(body.fileName);
+  if (!name.toLowerCase().endsWith(ext)) name += ext;
+  if (name === ext || name.startsWith(".")) throw new HttpError(400, "Invalid file name");
+
+  const folder = cleanName(body.folder, true);
+  const dir = folder ? join(typeDir(body.type), folder) : typeDir(body.type);
+  const finalPath = join(dir, name);
+  if (await exists(finalPath)) throw new HttpError(409, "File already exists");
+
+  await mkdir(dir, { recursive: true });
+  const tmpPath = join(dir, `.${name}.uploading`);
+  const fh = await open(tmpPath, "w+");
+  await fh.truncate(size);
+
+  const id = randomUUID();
+  const totalChunks = Math.ceil(size / CHUNK_SIZE);
+  sessions.set(id, {
+    fh, tmpPath, finalPath, size, totalChunks,
+    received: new Set(), writing: new Set(), touched: Date.now(), syncing: false,
   });
+  return { success: true, uploadId: id, chunkSize: CHUNK_SIZE, totalChunks };
+}
 
-console.log(`🦊 Elysia is running on http://0.0.0.0:${PORT}`);
+// Streams the raw body straight into its slot of the preallocated file.
+async function writeChunk(req: IncomingMessage, id: string, index: number) {
+  const s = getSession(id);
+  if (!Number.isInteger(index) || index < 0 || index >= s.totalChunks) {
+    throw new HttpError(400, "Invalid chunk index");
+  }
+  const start = index * CHUNK_SIZE;
+  const expected = Math.min(CHUNK_SIZE, s.size - start);
+  if (Number(req.headers["content-length"]) !== expected) {
+    throw new HttpError(400, `Chunk must be ${expected} bytes`);
+  }
+  if (s.received.has(index)) {
+    req.resume();
+    return { success: true, chunkIndex: index };
+  }
+  if (s.writing.has(index)) throw new HttpError(409, "Chunk is already being written");
+
+  s.writing.add(index);
+  try {
+    let written = 0;
+    for await (const buf of req as AsyncIterable<Buffer>) {
+      if (written + buf.length > expected) throw new HttpError(400, "Chunk too large");
+      await s.fh.write(buf, 0, buf.length, start + written);
+      written += buf.length;
+    }
+    if (written !== expected) throw new HttpError(400, "Chunk incomplete");
+    s.received.add(index);
+    s.touched = Date.now();
+    flushInBackground(s);
+    return { success: true, chunkIndex: index };
+  } finally {
+    s.writing.delete(index);
+  }
+}
+
+// macOS defers writeback, so without this the whole file is flushed at
+// complete time. Keeping one datasync running overlaps disk and network.
+function flushInBackground(s: Session) {
+  if (s.syncing) return;
+  s.syncing = true;
+  s.fh.datasync().catch(() => {}).finally(() => (s.syncing = false));
+}
+
+async function complete(id: string) {
+  const s = getSession(id);
+  const missing = missingChunks(s);
+  if (missing.length) throw new HttpError(409, `Missing ${missing.length} chunks`);
+  if (await exists(s.finalPath)) throw new HttpError(409, "File already exists");
+  sessions.delete(id);
+  await s.fh.sync();
+  await s.fh.close();
+  await rename(s.tmpPath, s.finalPath);
+  return { success: true, filePath: s.finalPath };
+}
+
+async function listFolders(type: unknown) {
+  const entries = await readdir(typeDir(type), { withFileTypes: true }).catch(() => []);
+  const folders = entries
+    .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b));
+  return { success: true, folders };
+}
+
+async function route(req: IncomingMessage, res: ServerResponse) {
+  const url = new URL(req.url ?? "/", "http://x");
+  const parts = url.pathname.split("/").filter(Boolean);
+  const m = req.method;
+
+  if (m === "GET" && (parts.length === 0 || url.pathname === "/health")) {
+    return { status: "ok", mediaRoot: MEDIA_ROOT, mediaRootOk: await exists(MEDIA_ROOT), uploads: sessions.size };
+  }
+  if (m === "GET" && url.pathname === "/folders") return listFolders(url.searchParams.get("type"));
+  if (parts[0] === "upload") {
+    if (m === "POST" && parts[1] === "init" && parts.length === 2) return init(req);
+    const id = parts[1] ?? "";
+    if (m === "PUT" && parts.length === 3) return writeChunk(req, id, Number(parts[2]));
+    if (m === "POST" && parts[2] === "complete" && parts.length === 3) return complete(id);
+    if (m === "GET" && parts.length === 2) {
+      const s = getSession(id);
+      return { success: true, totalChunks: s.totalChunks, missingChunks: missingChunks(s) };
+    }
+    if (m === "DELETE" && parts.length === 2) {
+      await dropSession(id, getSession(id));
+      return { success: true };
+    }
+  }
+  throw new HttpError(404, "Not found");
+}
+
+const server = createServer(async (req, res) => {
+  // LAN/Tailscale tool with no auth: reflect the caller's origin.
+  res.setHeader("access-control-allow-origin", req.headers.origin ?? "*");
+  res.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type");
+  res.setHeader("access-control-max-age", "86400");
+  if (req.method === "OPTIONS") return void res.writeHead(204).end();
+  try {
+    send(res, 200, await route(req, res));
+  } catch (err) {
+    const status = err instanceof HttpError ? err.status : 500;
+    if (status === 500) console.error(req.method, req.url, err);
+    if (!req.complete) req.resume();
+    send(res, status, { success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+server.keepAliveTimeout = 65_000;
+server.requestTimeout = 0; // big chunks on slow links must not be cut off
+
+// Drop uploads idle for a day, plus orphaned temp files from earlier runs.
+async function sweep() {
+  const now = Date.now();
+  for (const [id, s] of sessions) if (now - s.touched > STALE_MS) await dropSession(id, s);
+  const active = new Set([...sessions.values()].map((s) => s.tmpPath));
+  // Uploads only land in <type>/ or <type>/<folder>/, so scan two levels.
+  const ls = (dir: string) => readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const typeName of Object.values(TYPE_DIRS)) {
+    const root = join(MEDIA_ROOT, typeName);
+    const dirs = [root, ...(await ls(root)).filter((e) => e.isDirectory()).map((e) => join(root, e.name))];
+    for (const dir of dirs) {
+      for (const e of await ls(dir)) {
+        if (!e.isFile() || !e.name.endsWith(".uploading")) continue;
+        const p = join(dir, e.name);
+        const st = await stat(p).catch(() => null);
+        if (st && !active.has(p) && now - st.mtimeMs > STALE_MS) await rm(p, { force: true });
+      }
+    }
+  }
+}
+sweep().catch(console.error);
+setInterval(() => sweep().catch(console.error), 60 * 60 * 1000).unref();
+
+server.listen(PORT, "0.0.0.0", () => console.log(`NenoFlix uploader API on :${PORT} -> ${MEDIA_ROOT}`));

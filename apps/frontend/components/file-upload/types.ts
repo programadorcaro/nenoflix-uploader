@@ -2,7 +2,6 @@ export type ContentType = "movies" | "series" | "animes" | null;
 
 export interface Step1Data {
   contentType: ContentType;
-  baseDestinationPath: string;
   subFolderName: string;
   selectedExistingFolder: string;
   useMultipleUpload?: boolean; // Para séries/animes: usar upload múltiplo

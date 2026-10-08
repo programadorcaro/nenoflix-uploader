@@ -3,6 +3,8 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { ALLOWED_EXTENSIONS } from "../constants";
+import { estimateUploadTime, formatFileSize, getFileExtension } from "../utils/format";
+import { useFileDrop } from "../utils/use-file-drop";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CloudUploadIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
 
@@ -21,97 +23,8 @@ export function FileDropZone({
   disabled = false,
   accept = ".mkv,.mp4,.srt",
 }: FileDropZoneProps) {
-  const [isDragging, setIsDragging] = React.useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  const validateFile = (file: File): boolean => {
-    const fileName = file.name;
-    const lastDotIndex = fileName.lastIndexOf(".");
-    if (lastDotIndex === -1 || lastDotIndex === fileName.length - 1) {
-      return false;
-    }
-    const extension = fileName.substring(lastDotIndex).toLowerCase();
-    return ALLOWED_EXTENSIONS.includes(extension);
-  };
-
-  const handleFile = (file: File) => {
-    if (!validateFile(file)) {
-      return;
-    }
-    onFileSelect(file);
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!disabled) {
-      setIsDragging(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    if (disabled) return;
-
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile) {
-      handleFile(droppedFile);
-    }
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      handleFile(selectedFile);
-    }
-  };
-
-  const handleClick = () => {
-    if (!disabled && fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
-  };
-
-  const getFileExtension = (fileName: string): string => {
-    const lastDotIndex = fileName.lastIndexOf(".");
-    if (lastDotIndex === -1) return "";
-    return fileName.substring(lastDotIndex + 1).toUpperCase();
-  };
-
-  const estimateUploadTime = (fileSizeBytes: number): string => {
-    const averageSpeedMbps = 10;
-    const speedBytesPerSecond = (averageSpeedMbps * 1024 * 1024) / 8;
-    const seconds = fileSizeBytes / speedBytesPerSecond;
-
-    if (seconds < 60) {
-      return `${Math.round(seconds)}s`;
-    } else if (seconds < 3600) {
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = Math.round(seconds % 60);
-      return `${minutes}m ${remainingSeconds}s`;
-    } else {
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      return `${hours}h ${minutes}m`;
-    }
-  };
+  const { isDragging, inputRef: fileInputRef, open, onInputChange, dropProps } =
+    useFileDrop((files) => files[0] && onFileSelect(files[0]), disabled);
 
   if (file) {
     return (
@@ -176,7 +89,7 @@ export function FileDropZone({
           ref={fileInputRef}
           type="file"
           accept={accept}
-          onChange={handleFileInputChange}
+          onChange={onInputChange}
           disabled={disabled}
           className="hidden"
         />
@@ -186,10 +99,8 @@ export function FileDropZone({
 
   return (
     <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onClick={handleClick}
+      {...dropProps}
+      onClick={open}
       className={cn(
         "relative border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-200 cursor-pointer",
         isDragging
@@ -202,7 +113,7 @@ export function FileDropZone({
         ref={fileInputRef}
         type="file"
         accept={accept}
-        onChange={handleFileInputChange}
+        onChange={onInputChange}
         disabled={disabled}
         className="hidden"
       />

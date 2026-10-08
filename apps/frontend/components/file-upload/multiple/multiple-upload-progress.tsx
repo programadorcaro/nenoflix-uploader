@@ -5,83 +5,13 @@ import Image from "next/image";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import type { MultipleFileItem } from "./types";
+import { formatFileSize, formatTime, mediaLocation } from "../utils/format";
 
 interface MultipleUploadProgressProps {
   files: MultipleFileItem[];
   currentUploadIndex: number;
   contentType: "series" | "animes" | "movies";
   onReset: () => void;
-}
-
-function formatFilePath(
-  finalFilePath: string,
-  contentType: "series" | "animes" | "movies"
-): string {
-  const pathParts = finalFilePath.split(/[/\\]/).filter(Boolean);
-  
-  if (contentType === "movies") {
-    // Para filmes, retorna apenas /Movies/{nome_do_arquivo}
-    const moviesIndex = pathParts.findIndex(
-      (part) =>
-        part === "Movies" ||
-        part.toLowerCase() === "movies"
-    );
-    
-    if (moviesIndex !== -1) {
-      // Pega o nome do arquivo (última parte do caminho)
-      const fileName = pathParts[pathParts.length - 1];
-      return `/Movies/${fileName}`;
-    }
-    
-    // Fallback: retorna apenas o nome do arquivo
-    return pathParts[pathParts.length - 1] || finalFilePath;
-  }
-  
-  // Para séries e animes, mantém a lógica original
-  const contentTypeName = contentType === "series" ? "Series" : "Animes";
-  const contentTypeIndex = pathParts.findIndex(
-    (part) =>
-      part === contentTypeName ||
-      part === contentTypeName.toLowerCase() ||
-      part.toLowerCase() === contentTypeName.toLowerCase()
-  );
-
-  if (contentTypeIndex !== -1) {
-    // Retorna /Animes/{pasta} ou /Series/{pasta}
-    const folderPart = pathParts[contentTypeIndex + 1];
-    if (folderPart) {
-      return `/${pathParts[contentTypeIndex]}/${folderPart}`;
-    }
-    return `/${pathParts[contentTypeIndex]}`;
-  }
-
-  // Fallback: pega as duas últimas pastas antes do arquivo
-  if (pathParts.length >= 2) {
-    return `/${pathParts[pathParts.length - 2]}`;
-  }
-  return finalFilePath;
-}
-
-function formatTime(seconds: number): string {
-  if (seconds < 60) {
-    return `${Math.round(seconds)}s`;
-  } else if (seconds < 3600) {
-    const minutes = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    return `${minutes}m ${secs}s`;
-  } else {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${hours}h ${minutes}m`;
-  }
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
 }
 
 export function MultipleUploadProgress({
@@ -156,9 +86,10 @@ export function MultipleUploadProgress({
                         </p>
                         {fileItem.finalFilePath && (
                           <p className="text-xs font-mono text-muted-foreground mt-1 break-all">
-                            {formatFilePath(
+                            {mediaLocation(
                               fileItem.finalFilePath,
-                              contentType
+                              contentType,
+                              contentType === "movies"
                             )}
                           </p>
                         )}

@@ -3,6 +3,8 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { ALLOWED_EXTENSIONS } from "../constants";
+import { formatFileSize } from "../utils/format";
+import { useFileDrop } from "../utils/use-file-drop";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CloudUploadIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import type { MultipleFileItem } from "./types";
@@ -22,80 +24,8 @@ export function MultipleFileSelector({
   disabled = false,
   accept = ".mkv,.mp4,.srt",
 }: MultipleFileSelectorProps) {
-  const [isDragging, setIsDragging] = React.useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  const validateFile = (file: File): boolean => {
-    const fileName = file.name;
-    const lastDotIndex = fileName.lastIndexOf(".");
-    if (lastDotIndex === -1 || lastDotIndex === fileName.length - 1) {
-      return false;
-    }
-    const extension = fileName.substring(lastDotIndex).toLowerCase();
-    return ALLOWED_EXTENSIONS.includes(extension);
-  };
-
-  const handleFiles = (fileList: FileList | null) => {
-    if (!fileList) return;
-
-    const validFiles: File[] = [];
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      if (file && validateFile(file)) {
-        validFiles.push(file);
-      }
-    }
-
-    if (validFiles.length > 0) {
-      onFilesSelect(validFiles);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!disabled) {
-      setIsDragging(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    if (disabled) return;
-
-    handleFiles(e.dataTransfer.files);
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    handleFiles(e.target.files);
-    // Reset input to allow selecting same files again
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
-  const handleClick = () => {
-    if (!disabled && fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
-  };
+  const { isDragging, inputRef: fileInputRef, open, onInputChange, dropProps } =
+    useFileDrop(onFilesSelect, disabled);
 
   if (files.length > 0) {
     return (
@@ -162,7 +92,7 @@ export function MultipleFileSelector({
           type="file"
           accept={accept}
           multiple
-          onChange={handleFileInputChange}
+          onChange={onInputChange}
           disabled={disabled}
           className="hidden"
         />
@@ -172,10 +102,8 @@ export function MultipleFileSelector({
 
   return (
     <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onClick={handleClick}
+      {...dropProps}
+      onClick={open}
       className={cn(
         "relative border-2 border-dashed rounded-xl p-8 sm:p-12 text-center transition-all duration-200 cursor-pointer",
         isDragging
@@ -189,7 +117,7 @@ export function MultipleFileSelector({
         type="file"
         accept={accept}
         multiple
-        onChange={handleFileInputChange}
+        onChange={onInputChange}
         disabled={disabled}
         className="hidden"
       />

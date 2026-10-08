@@ -6,14 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "NODE_ENV=production node dist/index.js"
-  },
-  "dependencies": {
-    "@elysiajs/cors": "^1.4.0",
-    "@elysiajs/node": "^1.0.0",
-    "@sinclair/typebox": "^0.34.0",
-    "elysia": "^1.0.0",
-    "openapi-types": "^12.0.0"
+    "start": "NODE_ENV=production UV_THREADPOOL_SIZE=8 node dist/index.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

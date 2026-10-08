@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { extractFileName } from "../utils/format";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
@@ -28,11 +29,6 @@ export function FileNamesEditor({
       if (!fileItem.fileName.trim()) {
         // Usa o nome original do arquivo (já vem pré-preenchido do multiple/index.tsx)
         // Mas garante que se estiver vazio, preenche com o nome original
-        const extractFileName = (fileName: string): string => {
-          const lastDotIndex = fileName.lastIndexOf(".");
-          if (lastDotIndex === -1) return fileName;
-          return fileName.substring(0, lastDotIndex);
-        };
         const originalName = extractFileName(fileItem.originalFileName);
         onFileNameChange(fileItem.id, originalName);
       }

@@ -6,8 +6,7 @@ import { Field } from "@/components/ui/field";
 import { ContentTypeSelector } from "./content-type-selector";
 import { FolderSelector } from "./folder-selector";
 import type { ContentType, Step1Data } from "../types";
-import { BACKEND_URL } from "../constants";
-import { FINAL_PATH } from "@/lib/consts";
+import { listFolders } from "@/lib/upload";
 
 interface Step1Props {
   data: Step1Data;
@@ -29,49 +28,21 @@ export function Step1({
   const [existingFolders, setExistingFolders] = React.useState<string[]>([]);
   const [isLoadingFolders, setIsLoadingFolders] = React.useState(false);
 
-  const loadFolders = React.useCallback(async (path: string) => {
-    setIsLoadingFolders(true);
-    try {
-      const response = await fetch(
-        `${BACKEND_URL}/folders?path=${encodeURIComponent(path)}`
-      );
-      const result = await response.json();
-      if (result.success) {
-        setExistingFolders(result.folders || []);
-      } else {
-        setExistingFolders([]);
-      }
-    } catch (err) {
-      console.error("Error loading folders:", err);
-      setExistingFolders([]);
-    } finally {
-      setIsLoadingFolders(false);
-    }
-  }, []);
-
   React.useEffect(() => {
-    if (
-      data.contentType &&
-      (data.contentType === "series" || data.contentType === "animes")
-    ) {
-      loadFolders(data.baseDestinationPath);
-    }
-  }, [data.contentType, data.baseDestinationPath, loadFolders]);
+    const type = data.contentType;
+    if (type !== "series" && type !== "animes") return;
+    const controller = new AbortController();
+    setIsLoadingFolders(true);
+    listFolders(type, controller.signal)
+      .then(setExistingFolders, () => setExistingFolders([]))
+      .finally(() => setIsLoadingFolders(false));
+    return () => controller.abort();
+  }, [data.contentType]);
 
   const handleContentTypeSelect = (type: ContentType) => {
     onError(null);
-    let basePath = "";
-    if (type === "movies") {
-      basePath = `${FINAL_PATH}/Movies`;
-    } else if (type === "series") {
-      basePath = `${FINAL_PATH}/Series`;
-    } else if (type === "animes") {
-      basePath = `${FINAL_PATH}/Animes`;
-    }
-
     onDataChange({
       contentType: type,
-      baseDestinationPath: basePath,
       subFolderName: "",
       selectedExistingFolder: "",
     });
