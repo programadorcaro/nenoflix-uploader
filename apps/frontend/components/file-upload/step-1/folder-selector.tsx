@@ -3,112 +3,89 @@
 import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface FolderSelectorProps {
-  label: string;
-  /** Current folder text: an existing folder or a new name. */
-  value: string;
+  subFolderName: string;
+  selectedExistingFolder: string;
   existingFolders: string[];
   isLoadingFolders: boolean;
-  onChange: (value: string, isExisting: boolean) => void;
+  onSubFolderNameChange: (value: string) => void;
+  onExistingFolderChange: (value: string) => void;
   disabled?: boolean;
 }
 
-const normalize = (s: string) =>
-  s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
-
-/** One field for both cases: type to filter existing folders or to name a new one. */
 export function FolderSelector({
-  label,
-  value,
+  subFolderName,
+  selectedExistingFolder,
   existingFolders,
   isLoadingFolders,
-  onChange,
+  onSubFolderNameChange,
+  onExistingFolderChange,
   disabled = false,
 }: FolderSelectorProps) {
-  const [open, setOpen] = React.useState(false);
-  const query = normalize(value);
-  const isExisting = existingFolders.includes(value.trim());
-  const matches = React.useMemo(
-    () => existingFolders.filter((f) => normalize(f).includes(query)),
-    [existingFolders, query]
-  );
+  const handleSubFolderNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onSubFolderNameChange(e.target.value);
+    onExistingFolderChange("");
+  };
 
-  const pick = (folder: string) => {
-    onChange(folder, true);
-    setOpen(false);
+  const handleExistingFolderChange = (value: string) => {
+    onExistingFolderChange(value);
+    onSubFolderNameChange("");
   };
 
   return (
-    <Field>
-      <div className="flex items-center justify-between gap-2">
-        <FieldLabel htmlFor="folder" className="text-sm font-semibold sm:text-base">
-          {label}
-        </FieldLabel>
-        {value.trim() && (
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              isExisting ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary"
-            }`}
-          >
-            {isExisting ? "Pasta existente" : "Nova pasta"}
-          </span>
-        )}
-      </div>
-      <div>
+    <div className="space-y-5 sm:space-y-6 pt-6 border-t border-border">
+      <Field>
+        <FieldLabel htmlFor="sub-folder-name" className="text-base font-semibold mb-3">Nome da Pasta</FieldLabel>
         <Input
-          id="folder"
-          value={value}
-          placeholder={isLoadingFolders ? "Carregando pastas..." : "Buscar ou criar pasta"}
-          onChange={(e) => {
-            onChange(e.target.value, existingFolders.includes(e.target.value.trim()));
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 120)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
-            if (e.key === "Enter" && matches[0] && !isExisting) {
-              e.preventDefault();
-              pick(matches[0]);
-            }
-          }}
+          id="sub-folder-name"
+          placeholder="Ex: breaking-bad, naruto"
+          value={subFolderName}
+          onChange={handleSubFolderNameChange}
           disabled={disabled}
-          autoComplete="off"
-          role="combobox"
-          aria-expanded={open}
-          aria-controls="folder-options"
-          className="h-11 text-base"
+          className="text-base"
         />
-        {open && !isExisting && matches.length > 0 && (
-          <ul
-            id="folder-options"
-            role="listbox"
-            className="mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-popover p-1"
-          >
-            {matches.map((folder) => (
-              <li key={folder} role="option" aria-selected={false}>
-                <button
-                  type="button"
-                  // mousedown fires before the input blur closes the list
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(folder);
-                  }}
-                  className="flex min-h-11 w-full items-center rounded-md px-3 text-left text-sm hover:bg-muted focus:bg-muted focus:outline-none"
-                >
-                  <span className="truncate">{folder}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {existingFolders.length > 0
-          ? `${existingFolders.length} pastas existentes. Digite para buscar ou use um nome novo.`
-          : "Digite o nome da pasta."}
-      </p>
-    </Field>
+      </Field>
+      <div className="text-sm text-muted-foreground text-center font-medium">ou</div>
+      <Field>
+        <FieldLabel htmlFor="existing-folder" className="text-base font-semibold mb-3">
+          Selecionar Pasta Existente
+        </FieldLabel>
+        <Select
+          value={selectedExistingFolder}
+          onValueChange={handleExistingFolderChange}
+          disabled={disabled || isLoadingFolders}
+        >
+          <SelectTrigger id="existing-folder" className="text-base">
+            <SelectValue
+              placeholder={
+                isLoadingFolders ? "Carregando..." : "Selecione uma pasta"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {existingFolders.length === 0 ? (
+              <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                Nenhuma pasta encontrada
+              </div>
+            ) : (
+              existingFolders.map((folder) => (
+                <SelectItem key={folder} value={folder}>
+                  {folder}
+                </SelectItem>
+              ))
+            )}
+          </SelectContent>
+        </Select>
+      </Field>
+    </div>
   );
 }
+

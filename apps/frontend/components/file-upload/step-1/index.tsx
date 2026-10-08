@@ -63,7 +63,6 @@ export function Step1({
   };
 
   const isShow = data.contentType === "series" || data.contentType === "animes";
-  const folderValue = data.selectedExistingFolder || data.subFolderName;
 
   return (
     <div className="flex flex-1 flex-col gap-5 sm:gap-6">
@@ -75,17 +74,12 @@ export function Step1({
 
       {isShow && (
         <FolderSelector
-          label={data.contentType === "series" ? "Pasta da série" : "Pasta do anime"}
-          value={folderValue}
+          subFolderName={data.subFolderName}
+          selectedExistingFolder={data.selectedExistingFolder}
           existingFolders={existingFolders}
           isLoadingFolders={isLoadingFolders}
-          onChange={(value, isExisting) =>
-            onDataChange(
-              isExisting
-                ? { selectedExistingFolder: value.trim(), subFolderName: "" }
-                : { selectedExistingFolder: "", subFolderName: value }
-            )
-          }
+          onSubFolderNameChange={(value) => onDataChange({ subFolderName: value })}
+          onExistingFolderChange={(value) => onDataChange({ selectedExistingFolder: value })}
           disabled={isUploading}
         />
       )}
