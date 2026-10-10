@@ -19,6 +19,7 @@ interface Step3Props {
   timeElapsed?: number;
   timeRemaining?: number | null;
   uploadSpeed?: number;
+  reconnecting?: boolean;
   finalFilePath?: string;
   onDataChange: (data: Partial<Step3Data>) => void;
   onUpload: () => void;
@@ -36,6 +37,7 @@ export function Step3({
   timeElapsed,
   timeRemaining,
   uploadSpeed,
+  reconnecting,
   finalFilePath,
   onDataChange,
   onUpload,
@@ -205,7 +207,10 @@ export function Step3({
 
   const completing = uploadStatus === "completing";
   const stats = [
-    { label: "Velocidade", value: uploadSpeed ? `${(uploadSpeed / 1048576).toFixed(1)} MB/s` : "—" },
+    {
+      label: "Velocidade",
+      value: reconnecting ? "Reconectando…" : uploadSpeed ? `${(uploadSpeed / 1048576).toFixed(1)} MB/s` : "—",
+    },
     { label: "Decorrido", value: timeElapsed !== undefined ? formatTime(timeElapsed) : "—" },
     { label: "Restante", value: completing ? "0s" : timeRemaining != null ? formatTime(timeRemaining) : "—" },
   ];

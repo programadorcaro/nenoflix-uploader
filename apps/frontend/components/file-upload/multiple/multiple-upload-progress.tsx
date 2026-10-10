@@ -114,7 +114,11 @@ export function MultipleUploadProgress({ files, currentUploadIndex, contentType,
         </div>
         <Progress value={overall} className="mt-3 h-2.5" />
         <p className="mt-2 text-xs text-muted-foreground tabular-nums">
-          {current?.uploadSpeed ? `${(current.uploadSpeed / 1048576).toFixed(1)} MB/s` : "Calculando velocidade..."}
+          {current?.reconnecting
+            ? "Reconectando…"
+            : current?.uploadSpeed
+              ? `${(current.uploadSpeed / 1048576).toFixed(1)} MB/s`
+              : "Calculando velocidade..."}
           {current?.timeElapsed !== undefined && ` · ${formatTime(current.timeElapsed)} neste arquivo`}
         </p>
       </div>

@@ -31,6 +31,7 @@ export interface FileUploadState {
   timeElapsed?: number;
   timeRemaining?: number | null;
   uploadSpeed?: number;
+  reconnecting?: boolean;
   finalFilePath?: string;
 }
 

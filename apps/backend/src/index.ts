@@ -5,7 +5,10 @@ import { dirname, extname, join } from "node:path";
 
 const PORT = Number(process.env.PORT ?? 8098);
 const MEDIA_ROOT = process.env.MEDIA_ROOT ?? "/Volumes/MediaNAS/Jellyfin/media";
-const CHUNK_SIZE = 16 * 1024 * 1024;
+// Small enough that a dropped connection over Tailscale costs little to resend.
+const CHUNK_SIZE = 8 * 1024 * 1024;
+// Socket buffers (~64 KiB) are batched into one write of this size.
+const WRITE_BATCH = 2 * 1024 * 1024;
 const STALE_MS = 24 * 60 * 60 * 1000;
 const ALLOWED_EXTENSIONS = [".mkv", ".mp4", ".srt"];
 const TYPE_DIRS: Record<string, string> = { movies: "Movies", series: "Series", animes: "Animes" };
@@ -20,6 +23,8 @@ interface Session {
   writing: Set<number>;
   touched: number;
   syncing: boolean;
+  startedAt: number;
+  aborts: number;
 }
 const sessions = new Map<string, Session>();
 
@@ -109,6 +114,7 @@ async function init(req: IncomingMessage) {
   sessions.set(id, {
     fh, tmpPath, finalPath, size, totalChunks,
     received: new Set(), writing: new Set(), touched: Date.now(), syncing: false,
+    startedAt: Date.now(), aborts: 0,
   });
   return { success: true, uploadId: id, chunkSize: CHUNK_SIZE, totalChunks };
 }
@@ -133,11 +139,31 @@ async function writeChunk(req: IncomingMessage, id: string, index: number) {
   s.writing.add(index);
   try {
     let written = 0;
-    for await (const buf of req as AsyncIterable<Buffer>) {
-      if (written + buf.length > expected) throw new HttpError(400, "Chunk too large");
+    let pending: Buffer[] = [];
+    let pendingBytes = 0;
+    const flush = async () => {
+      if (!pendingBytes) return;
+      const buf = pending.length === 1 ? pending[0]! : Buffer.concat(pending, pendingBytes);
+      pending = [];
+      pendingBytes = 0;
       await s.fh.write(buf, 0, buf.length, start + written);
       written += buf.length;
+    };
+    try {
+      for await (const buf of req as AsyncIterable<Buffer>) {
+        if (written + pendingBytes + buf.length > expected) throw new HttpError(400, "Chunk too large");
+        pending.push(buf);
+        pendingBytes += buf.length;
+        if (pendingBytes >= WRITE_BATCH) await flush();
+      }
+    } catch (err) {
+      if (!(err instanceof HttpError)) {
+        s.aborts++;
+        throw new HttpError(499, "Client aborted");
+      }
+      throw err;
     }
+    await flush();
     if (written !== expected) throw new HttpError(400, "Chunk incomplete");
     s.received.add(index);
     s.touched = Date.now();
@@ -165,7 +191,21 @@ async function complete(id: string) {
   await s.fh.sync();
   await s.fh.close();
   await rename(s.tmpPath, s.finalPath);
+  const secs = (Date.now() - s.startedAt) / 1000;
+  console.log(
+    `upload done ${s.finalPath} ${(s.size / 1048576).toFixed(0)} MiB in ${secs.toFixed(0)}s ` +
+      `(${(s.size / 1048576 / secs).toFixed(2)} MiB/s, ${s.aborts} aborted chunks)`
+  );
   return { success: true, filePath: s.finalPath };
+}
+
+// Network-only throughput check: reads the body and discards it.
+async function speedtest(req: IncomingMessage) {
+  const t0 = Date.now();
+  let bytes = 0;
+  for await (const buf of req as AsyncIterable<Buffer>) bytes += buf.length;
+  const ms = Math.max(1, Date.now() - t0);
+  return { success: true, bytes, ms, mibPerSec: bytes / 1048576 / (ms / 1000) };
 }
 
 async function listFolders(type: unknown) {
@@ -185,6 +225,7 @@ async function route(req: IncomingMessage, res: ServerResponse) {
   if (m === "GET" && (parts.length === 0 || url.pathname === "/health")) {
     return { status: "ok", mediaRoot: MEDIA_ROOT, mediaRootOk: await exists(MEDIA_ROOT), uploads: sessions.size };
   }
+  if (m === "PUT" && url.pathname === "/speedtest") return speedtest(req);
   if (m === "GET" && url.pathname === "/folders") return listFolders(url.searchParams.get("type"));
   if (parts[0] === "upload") {
     if (m === "POST" && parts[1] === "init" && parts.length === 2) return init(req);
@@ -193,7 +234,10 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     if (m === "POST" && parts[2] === "complete" && parts.length === 3) return complete(id);
     if (m === "GET" && parts.length === 2) {
       const s = getSession(id);
-      return { success: true, totalChunks: s.totalChunks, missingChunks: missingChunks(s) };
+      return {
+        success: true, size: s.size, chunkSize: CHUNK_SIZE, totalChunks: s.totalChunks,
+        missingChunks: missingChunks(s),
+      };
     }
     if (m === "DELETE" && parts.length === 2) {
       await dropSession(id, getSession(id));
@@ -215,6 +259,7 @@ const server = createServer(async (req, res) => {
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(req.method, req.url, err);
+    else if (status === 499) console.log(req.method, req.url, "client aborted");
     if (!req.complete) req.resume();
     send(res, status, { success: false, error: err instanceof Error ? err.message : String(err) });
   }

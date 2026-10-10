@@ -151,6 +151,7 @@ export function FileUpload({ onComplete }: FileUploadProps) {
               timeElapsed: p.timeElapsed,
               timeRemaining: p.timeRemaining,
               uploadSpeed: p.uploadSpeed,
+              reconnecting: p.reconnecting,
             })),
         }
       );
@@ -301,6 +302,7 @@ export function FileUpload({ onComplete }: FileUploadProps) {
               timeElapsed={state.timeElapsed}
               timeRemaining={state.timeRemaining}
               uploadSpeed={state.uploadSpeed}
+              reconnecting={state.reconnecting}
               finalFilePath={state.finalFilePath}
               onDataChange={updateStep3Data}
               onUpload={handleUpload}

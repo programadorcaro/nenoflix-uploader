@@ -140,6 +140,7 @@ export function MultipleUpload({
                 progress: p.percentage,
                 timeElapsed: p.timeElapsed,
                 uploadSpeed: p.uploadSpeed,
+                reconnecting: p.reconnecting,
               }),
           }
         );

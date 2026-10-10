@@ -8,6 +8,7 @@ export interface MultipleFileItem {
   error?: string;
   timeElapsed?: number;
   uploadSpeed?: number;
+  reconnecting?: boolean;
   finalFilePath?: string;
 }
 
