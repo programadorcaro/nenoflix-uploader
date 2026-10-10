@@ -21,6 +21,9 @@ import { episodeTag, findConflicts, folderSummary, sortByEpisode } from "./utils
 
 const SAMPLES = 90; // seconds of speed history in the chart
 const emptyLive: LiveStats = { speed: 0, reconnecting: false, samples: [], elapsed: 0 };
+// crypto.randomUUID only exists on HTTPS/localhost; the app is also opened over plain HTTP.
+let nextId = 0;
+const newId = () => `f${++nextId}-${Date.now().toString(36)}`;
 
 function Section({ n, title, aside, children }: { n: number; title: string; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -146,7 +149,7 @@ export function Uploader() {
       const fresh = files
         .filter((f) => !known.has(`${f.name}|${f.size}`))
         .map<QueueItem>((file) => ({
-          id: crypto.randomUUID(),
+          id: newId(),
           file,
           name: extractFileName(file.name),
           status: "pending",
