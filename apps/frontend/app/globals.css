@@ -127,6 +127,16 @@
       radial-gradient(40rem 24rem at -10% 110%, oklch(0.55 0.2 330 / 0.1), transparent 70%);
     background-attachment: fixed;
   }
+  /* Tailwind v4 preflight resets buttons to the default cursor. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="radio"]:not(:disabled),
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
   ::selection {
     background: oklch(0.66 0.21 354 / 0.35);
   }

@@ -28,7 +28,7 @@ function Section({ n, title, aside, children }: { n: number; title: string; asid
       <div className="flex items-center gap-2.5">
         <span className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">{n}</span>
         <h2 className="text-sm font-semibold">{title}</h2>
-        {aside && <div className="ml-auto min-w-0 text-xs text-muted-foreground">{aside}</div>}
+        {aside && <div className="ml-auto min-w-0 truncate text-xs text-muted-foreground">{aside}</div>}
       </div>
       {children}
     </section>
@@ -233,6 +233,8 @@ export function Uploader() {
     clockRef.current = { base: 0, startedAt: 0 };
     itemElapsedRef.current.clear();
     setLive(emptyLive);
+    // On phones the progress panel moves to the top; bring it into view.
+    if (window.matchMedia("(max-width: 1023px)").matches) window.scrollTo({ top: 0, behavior: "smooth" });
     void run();
   };
 
@@ -381,7 +383,11 @@ export function Uploader() {
           <Section
             n={type ? 3 : 2}
             title={items.length > 1 ? "Fila de envio" : "Arquivo"}
-            aside={items.length > 1 && phase === "compose" ? "Envia um por vez, na ordem dos episódios" : undefined}
+            aside={
+              items.length > 1 && phase === "compose" ? (
+                <span className="hidden sm:inline">Envia um por vez, na ordem dos episódios</span>
+              ) : undefined
+            }
           >
             {phase === "compose" && <DropZone onFiles={addFiles} compact={items.length > 0} />}
             {single && (
