@@ -1,4 +1,4 @@
-import { BACKEND_URL } from "@/components/file-upload/constants";
+import { BACKEND_URL } from "@/components/uploader/constants";
 
 export type MediaType = "movies" | "series" | "animes";
 
@@ -9,6 +9,22 @@ export interface UploadProgress {
   uploadSpeed: number; // bytes per second
   /** Some chunks are waiting to retry after a network error. */
   reconnecting: boolean;
+  sentBytes: number;
+  totalBytes: number;
+}
+
+/** Abort reason that stops an upload but keeps it resumable. */
+export const PAUSED = "paused";
+const LAST_SPEED_KEY = "nenoflix-last-speed";
+
+/** Average speed of the last finished upload on this device, in bytes/s. */
+export function getLastSpeed(): number | null {
+  try {
+    const v = Number(localStorage.getItem(LAST_SPEED_KEY));
+    return v > 0 ? v : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface UploadTarget {
@@ -102,6 +118,9 @@ function putChunk(url: string, body: Blob, signal: AbortSignal, onBytes: (n: num
   });
 }
 
+const resumeKey = (file: File, target: UploadTarget) =>
+  [file.name, file.size, file.lastModified, target.type, target.folder ?? "", target.fileName].join("|");
+
 type Session = { uploadId: string; chunkSize: number; totalChunks: number; missingChunks: number[] };
 
 // Reuse the server session of an earlier attempt for this exact file and target.
@@ -146,7 +165,7 @@ export async function uploadFile(
     signal?: AbortSignal;
   } = {}
 ): Promise<string> {
-  const key = [file.name, file.size, file.lastModified, target.type, target.folder ?? "", target.fileName].join("|");
+  const key = resumeKey(file, target);
   const { uploadId, chunkSize, missingChunks: todo } = await openSession(file, target, key, signal);
   const chunkBytes = (i: number) => Math.min(file.size, (i + 1) * chunkSize) - i * chunkSize;
 
@@ -155,6 +174,7 @@ export async function uploadFile(
   const inFlight = new Map<number, number>();
   let retrying = 0;
   let doneBytes = file.size - todo.reduce((sum, i) => sum + chunkBytes(i), 0);
+  const resumedBytes = doneBytes;
   let speed = 0;
   let lastBytes = 0;
   let lastAt = start;
@@ -176,6 +196,8 @@ export async function uploadFile(
       timeRemaining: speed > 0 ? (file.size - bytes) / speed : null,
       uploadSpeed: speed,
       reconnecting: retrying > 0,
+      sentBytes: bytes,
+      totalBytes: file.size,
     });
   };
   const timer = setInterval(report, PROGRESS_MS);
@@ -230,10 +252,18 @@ export async function uploadFile(
       signal,
     });
     resumeStore.clear(key);
+    const secs = (performance.now() - start) / 1000;
+    if (secs > 5) {
+      try {
+        localStorage.setItem(LAST_SPEED_KEY, String((file.size - resumedBytes) / secs));
+      } catch {
+        // ignore
+      }
+    }
     return filePath;
   } catch (err) {
     // Keep the server session on other errors so a retry resumes where it stopped.
-    if (signal.aborted || (err as { fatal?: boolean }).fatal) {
+    if ((signal.aborted && signal.reason !== PAUSED) || (err as { fatal?: boolean }).fatal) {
       resumeStore.clear(key);
       fetch(`${BACKEND_URL}/upload/${uploadId}`, { method: "DELETE", keepalive: true }).catch(() => {});
     }
@@ -241,6 +271,20 @@ export async function uploadFile(
   } finally {
     clearInterval(timer);
   }
+}
+
+/** Drops the server session of a paused upload so its temp file goes away. */
+export function discardUpload(file: File, target: UploadTarget) {
+  const key = resumeKey(file, target);
+  const id = resumeStore.get(key);
+  resumeStore.clear(key);
+  if (id) fetch(`${BACKEND_URL}/upload/${id}`, { method: "DELETE", keepalive: true }).catch(() => {});
+}
+
+export async function listFiles(type: MediaType, folder: string, signal?: AbortSignal) {
+  const q = new URLSearchParams({ type, folder });
+  const { files } = await api<{ files: { name: string; size: number }[] }>(`/files?${q}`, { signal });
+  return files;
 }
 
 export async function listFolders(type: MediaType, signal?: AbortSignal) {

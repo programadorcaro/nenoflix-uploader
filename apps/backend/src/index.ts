@@ -208,6 +208,20 @@ async function speedtest(req: IncomingMessage) {
   return { success: true, bytes, ms, mibPerSec: bytes / 1048576 / (ms / 1000) };
 }
 
+// Files already in a destination folder, for conflict checks before upload.
+async function listFiles(type: unknown, folder: unknown) {
+  const name = cleanName(folder, true);
+  const dir = name ? join(typeDir(type), name) : typeDir(type);
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const files = await Promise.all(
+    entries
+      .filter((e) => e.isFile() && !e.name.startsWith("."))
+      .map(async (e) => ({ name: e.name, size: (await stat(join(dir, e.name)).catch(() => null))?.size ?? 0 }))
+  );
+  files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  return { success: true, files };
+}
+
 async function listFolders(type: unknown) {
   const entries = await readdir(typeDir(type), { withFileTypes: true }).catch(() => []);
   const folders = entries
@@ -226,6 +240,9 @@ async function route(req: IncomingMessage, res: ServerResponse) {
     return { status: "ok", mediaRoot: MEDIA_ROOT, mediaRootOk: await exists(MEDIA_ROOT), uploads: sessions.size };
   }
   if (m === "PUT" && url.pathname === "/speedtest") return speedtest(req);
+  if (m === "GET" && url.pathname === "/files") {
+    return listFiles(url.searchParams.get("type"), url.searchParams.get("folder"));
+  }
   if (m === "GET" && url.pathname === "/folders") return listFolders(url.searchParams.get("type"));
   if (parts[0] === "upload") {
     if (m === "POST" && parts[1] === "init" && parts.length === 2) return init(req);
